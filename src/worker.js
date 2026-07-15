@@ -170,6 +170,22 @@ async function resolveReferenceSource({ attachmentFile, referenceUrl, download }
   }
 }
 
+function buildVideoGenerationMessage({ referenceDurationSeconds, fallbackUrl = '', videoPrompt = '' }) {
+  const durationInstruction = Number.isFinite(referenceDurationSeconds)
+    ? `参考视频检测时长为 ${referenceDurationSeconds.toFixed(3)} 秒。最终视频必须与参考视频时长一致，误差不得超过 1 秒。`
+    : '生成前必须先读取参考视频并检测其精确时长；最终视频必须以检测到的参考时长为准，误差不得超过 1 秒。';
+  return [
+    '使用已上传的所选人设形象和参考视频生成最终视频。',
+    '已上传的所选人设图片是最终视频的唯一人物形象来源。必须把参考视频中的人物完整替换为该人设；不得保留或混合参考视频原人物的脸、五官、发型、年龄、服装、体型和气质。',
+    '参考视频原人物仅用于提供动作、口型、走位和时间点，不得作为人物外观来源。',
+    durationInstruction,
+    '完整复刻参考视频的动作、动作顺序与时间点、对白、台词、旁白、原声、BGM、音效、镜头、运镜、构图、场景调度和剪辑节奏，保持音画同步。',
+    fallbackUrl ? `参考视频链接：${fallbackUrl}。本地下载受平台限制，请直接读取该链接作为参考视频。` : '',
+    videoPrompt ? `补充视频提示词：${videoPrompt}` : '',
+    '参考视频优先级最高；补充提示词不得覆盖参考视频内容。无需展示方案，直接生成最终视频。',
+  ].filter(Boolean).join('\n');
+}
+
 function uploadXyqAsset(filePath) {
   const script = path.join(CONFIG.xyq_skill_scripts, 'upload_file.py');
   const stdout = run('python', [script, filePath]);
@@ -486,4 +502,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { collectUrls, chooseArtifactUrl, extractMarkdownUrl, firstOption, linkedRecordId, resolveReferenceSource, rowsFromEnvelope };
+module.exports = { buildVideoGenerationMessage, collectUrls, chooseArtifactUrl, extractMarkdownUrl, firstOption, linkedRecordId, resolveReferenceSource, rowsFromEnvelope };

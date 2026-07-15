@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { collectUrls, chooseArtifactUrl, extractMarkdownUrl, firstOption, linkedRecordId, resolveReferenceSource, rowsFromEnvelope } = require('../src/worker');
+const { buildVideoGenerationMessage, collectUrls, chooseArtifactUrl, extractMarkdownUrl, firstOption, linkedRecordId, resolveReferenceSource, rowsFromEnvelope } = require('../src/worker');
 
 test('extractMarkdownUrl extracts Feishu markdown links', () => {
   assert.equal(extractMarkdownUrl('[视频](https://v.douyin.com/example/)'), 'https://v.douyin.com/example/');
@@ -38,4 +38,18 @@ test('falls back to the reference URL when downloading the video fails', async (
     fallbackUrl: 'https://v.douyin.com/example/',
     downloadError: 'cookies required',
   });
+});
+
+test('video task message uses the selected persona as the only identity and includes exact duration', () => {
+  const message = buildVideoGenerationMessage({ referenceDurationSeconds: 16.7 });
+  assert.match(message, /唯一人物形象来源/);
+  assert.match(message, /不得保留或混合参考视频原人物/);
+  assert.match(message, /16\.700 秒/);
+  assert.match(message, /误差不得超过 1 秒/);
+});
+
+test('URL-only video task tells 小云雀 to detect duration before generation', () => {
+  const message = buildVideoGenerationMessage({ fallbackUrl: 'https://v.douyin.com/example/' });
+  assert.match(message, /先读取参考视频并检测其精确时长/);
+  assert.match(message, /误差不得超过 1 秒/);
 });

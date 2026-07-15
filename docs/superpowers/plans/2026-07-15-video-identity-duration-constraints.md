@@ -28,7 +28,7 @@
 - Consumes: `{ referenceDurationSeconds?: number, fallbackUrl?: string, videoPrompt?: string }`
 - Produces: `buildVideoGenerationMessage(options): string`
 
-- [ ] **Step 1: Write the failing message tests**
+- [x] **Step 1: Write the failing message tests**
 
 ```js
 test('video task message uses the selected persona as the only identity and includes exact duration', () => {
@@ -46,13 +46,13 @@ test('URL-only video task tells 小云雀 to detect duration before generation',
 });
 ```
 
-- [ ] **Step 2: Run tests and verify RED**
+- [x] **Step 2: Run tests and verify RED**
 
 Run: `node --test test/worker.test.js`
 
 Expected: FAIL because `buildVideoGenerationMessage` is not exported/defined.
 
-- [ ] **Step 3: Implement the minimal message builder**
+- [x] **Step 3: Implement the minimal message builder**
 
 ```js
 function buildVideoGenerationMessage({ referenceDurationSeconds, fallbackUrl = '', videoPrompt = '' }) {
@@ -72,7 +72,7 @@ function buildVideoGenerationMessage({ referenceDurationSeconds, fallbackUrl = '
 }
 ```
 
-- [ ] **Step 4: Export the function and run tests**
+- [x] **Step 4: Export the function and run tests**
 
 Run: `node --test test/worker.test.js`
 
