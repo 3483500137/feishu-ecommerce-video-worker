@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { buildVideoGenerationMessage, collectUrls, chooseArtifactUrl, extractMarkdownUrl, firstOption, linkedRecordId, probeVideoDuration, resolveReferenceSource, rowsFromEnvelope } = require('../src/worker');
+const { buildPersonaImagePrompt, buildVideoGenerationMessage, collectUrls, chooseArtifactUrl, extractMarkdownUrl, firstOption, linkedRecordId, probeVideoDuration, resolveReferenceSource, rowsFromEnvelope } = require('../src/worker');
 
 test('extractMarkdownUrl extracts Feishu markdown links', () => {
   assert.equal(extractMarkdownUrl('[视频](https://v.douyin.com/example/)'), 'https://v.douyin.com/example/');
@@ -61,4 +61,17 @@ test('video duration probe parses FFmpeg duration output', () => {
 
 test('video duration probe returns null for unreadable output', () => {
   assert.equal(probeVideoDuration('reference.mp4', () => ({ stderr: 'Invalid data found' })), null);
+});
+
+test('persona image prompt requires real-camera photography and rejects 2D and CG styles', () => {
+  const prompt = buildPersonaImagePrompt('传承咏春的武术少女', '穿青白中式长裙');
+  assert.match(prompt, /传承咏春的武术少女/);
+  assert.match(prompt, /穿青白中式长裙/);
+  assert.match(prompt, /真实相机拍摄/);
+  assert.match(prompt, /自然皮肤纹理/);
+  assert.match(prompt, /真实五官比例/);
+  assert.match(prompt, /禁止.*2D.*动漫.*插画.*3D CG.*游戏建模.*数字人/);
+  assert.match(prompt, /20至30岁/);
+  assert.match(prompt, /单人全身/);
+  assert.match(prompt, /不得出现其他人物/);
 });

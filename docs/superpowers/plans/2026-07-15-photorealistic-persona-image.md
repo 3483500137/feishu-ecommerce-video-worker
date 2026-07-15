@@ -29,7 +29,7 @@
 - Consumes: `buildPersonaImagePrompt(persona: string, userRequirement?: string)`
 - Produces: a complete 小云雀 image-generation task message string.
 
-- [ ] **Step 1: Write the failing prompt test**
+- [x] **Step 1: Write the failing prompt test**
 
 ```js
 test('persona image prompt requires real-camera photography and rejects 2D and CG styles', () => {
@@ -46,13 +46,13 @@ test('persona image prompt requires real-camera photography and rejects 2D and C
 });
 ```
 
-- [ ] **Step 2: Run the test and verify RED**
+- [x] **Step 2: Run the test and verify RED**
 
 Run: `node --test test/worker.test.js`
 
 Expected: FAIL because `buildPersonaImagePrompt` is not exported/defined.
 
-- [ ] **Step 3: Implement the minimal prompt builder**
+- [x] **Step 3: Implement the minimal prompt builder**
 
 ```js
 function buildPersonaImagePrompt(persona, userRequirement = '') {
@@ -67,7 +67,7 @@ function buildPersonaImagePrompt(persona, userRequirement = '') {
 }
 ```
 
-- [ ] **Step 4: Integrate the builder and export it**
+- [x] **Step 4: Integrate the builder and export it**
 
 Replace the inline prompt in `processPersona` with:
 
@@ -77,7 +77,7 @@ const imagePrompt = buildPersonaImagePrompt(persona, row['输入人设要求'] |
 
 Add `buildPersonaImagePrompt` to `module.exports`.
 
-- [ ] **Step 5: Run full verification**
+- [x] **Step 5: Run full verification**
 
 Run: `npm test`
 
@@ -91,7 +91,7 @@ Run: `git diff --check`
 
 Expected: exit code 0 with no whitespace errors.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/worker.js test/worker.test.js docs/superpowers/plans/2026-07-15-photorealistic-persona-image.md

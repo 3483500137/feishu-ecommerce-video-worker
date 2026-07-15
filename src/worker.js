@@ -186,6 +186,17 @@ function buildVideoGenerationMessage({ referenceDurationSeconds, fallbackUrl = '
   ].filter(Boolean).join('\n');
 }
 
+function buildPersonaImagePrompt(persona, userRequirement = '') {
+  return [
+    `根据以下人设生成单人全身人物形象照片：${persona}`,
+    `用户要求：${userRequirement}`,
+    '输出必须是真实相机拍摄的真人摄影效果：真实成年女性，自然皮肤纹理、真实五官比例、自然人体结构和真实光影，不得呈现渲染质感。',
+    '人物必须是20至30岁的成年清纯女生，严格保持用户指定服装；画面为单人全身照片，不得出现其他人物。',
+    '禁止生成2D、动漫、插画、卡通、二次元、绘画、3D CG、游戏建模、数字人、塑料皮肤或明显渲染风格。',
+    '直接生成最终图片。',
+  ].filter(Boolean).join('\n');
+}
+
 function probeVideoDuration(filePath, spawn = spawnSync) {
   if (!filePath) return null;
   const result = spawn('ffmpeg', ['-hide_banner', '-i', filePath], {
@@ -332,7 +343,7 @@ async function processPersona(row) {
   try {
     const persona = await kimiPersona(row);
     updateRecord(CONFIG.persona_table_id, recordId, { '人设': persona });
-    const imagePrompt = `根据以下人设生成单人全身人物形象图：${persona}\n用户要求：${row['输入人设要求'] || ''}\n人物必须是20至30岁的成年清纯女生，严格保持用户指定服装；画面不得出现其他人物。直接生成最终图片。`;
+    const imagePrompt = buildPersonaImagePrompt(persona, row['输入人设要求'] || '');
     const result = await completeXyqTask({
       message: imagePrompt,
       assetIds: [],
@@ -513,4 +524,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { buildVideoGenerationMessage, collectUrls, chooseArtifactUrl, extractMarkdownUrl, firstOption, linkedRecordId, probeVideoDuration, resolveReferenceSource, rowsFromEnvelope };
+module.exports = { buildPersonaImagePrompt, buildVideoGenerationMessage, collectUrls, chooseArtifactUrl, extractMarkdownUrl, firstOption, linkedRecordId, probeVideoDuration, resolveReferenceSource, rowsFromEnvelope };
