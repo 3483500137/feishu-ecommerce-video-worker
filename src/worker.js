@@ -186,6 +186,20 @@ function buildVideoGenerationMessage({ referenceDurationSeconds, fallbackUrl = '
   ].filter(Boolean).join('\n');
 }
 
+function probeVideoDuration(filePath, spawn = spawnSync) {
+  if (!filePath) return null;
+  const result = spawn('ffmpeg', ['-hide_banner', '-i', filePath], {
+    cwd: ROOT,
+    encoding: 'utf8',
+    windowsHide: true,
+  });
+  const output = String(result.stderr || result.stdout || '');
+  const match = output.match(/Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/i);
+  if (!match) return null;
+  const seconds = Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3]);
+  return Number.isFinite(seconds) && seconds > 0 ? seconds : null;
+}
+
 function uploadXyqAsset(filePath) {
   const script = path.join(CONFIG.xyq_skill_scripts, 'upload_file.py');
   const stdout = run('python', [script, filePath]);
@@ -408,15 +422,12 @@ async function processContent(row, personaById) {
     if (referenceFile) {
       assetIds.push(uploadXyqAsset(referenceFile));
     }
-
-    const message = [
-      '使用已上传的所选人设形象和参考视频生成最终视频。',
-      '只替换参考视频中的人物形象：必须替换为当前内容记录所选择的人设形象，不得使用其他人物，不得改变该人设的脸、发型、年龄、服装和气质。',
-      '完整复刻参考视频的动作、动作顺序与时间点、对白、台词、旁白、原声、BGM、音效、镜头、运镜、构图、场景调度、剪辑节奏和总时长，保持音画同步。',
-      referenceSource.fallbackUrl ? `参考视频链接：${referenceSource.fallbackUrl}。本地下载受平台限制，请直接读取该链接作为参考视频。` : '',
-      row['视频提示词'] ? `补充视频提示词：${row['视频提示词']}` : '',
-      '参考视频优先级最高；补充提示词不得覆盖参考视频内容。无需展示方案，直接生成最终视频。',
-    ].filter(Boolean).join('\n');
+    const referenceDurationSeconds = probeVideoDuration(referenceFile);
+    const message = buildVideoGenerationMessage({
+      referenceDurationSeconds,
+      fallbackUrl: referenceSource.fallbackUrl,
+      videoPrompt: row['视频提示词'] || '',
+    });
 
     const result = await completeXyqTask({
       message,
@@ -502,4 +513,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { buildVideoGenerationMessage, collectUrls, chooseArtifactUrl, extractMarkdownUrl, firstOption, linkedRecordId, resolveReferenceSource, rowsFromEnvelope };
+module.exports = { buildVideoGenerationMessage, collectUrls, chooseArtifactUrl, extractMarkdownUrl, firstOption, linkedRecordId, probeVideoDuration, resolveReferenceSource, rowsFromEnvelope };

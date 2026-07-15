@@ -89,7 +89,7 @@ Expected: all message tests and existing tests PASS.
 - Produces: a positive duration in seconds, or `null` when FFmpeg cannot read one.
 - `processContent` passes the probe result into `buildVideoGenerationMessage`.
 
-- [ ] **Step 1: Write the failing duration-parser test**
+- [x] **Step 1: Write the failing duration-parser test**
 
 ```js
 test('video duration probe parses FFmpeg duration output', () => {
@@ -102,13 +102,13 @@ test('video duration probe returns null for unreadable output', () => {
 });
 ```
 
-- [ ] **Step 2: Run tests and verify RED**
+- [x] **Step 2: Run tests and verify RED**
 
 Run: `node --test test/worker.test.js`
 
 Expected: FAIL because `probeVideoDuration` is not exported/defined.
 
-- [ ] **Step 3: Implement the minimal FFmpeg probe**
+- [x] **Step 3: Implement the minimal FFmpeg probe**
 
 ```js
 function probeVideoDuration(filePath, spawn = spawnSync) {
@@ -125,7 +125,7 @@ function probeVideoDuration(filePath, spawn = spawnSync) {
 }
 ```
 
-- [ ] **Step 4: Integrate the builder in `processContent`**
+- [x] **Step 4: Integrate the builder in `processContent`**
 
 ```js
 const referenceDurationSeconds = probeVideoDuration(referenceFile);
@@ -138,7 +138,7 @@ const message = buildVideoGenerationMessage({
 
 Remove the previous inline `message` array and export `probeVideoDuration`.
 
-- [ ] **Step 5: Run the full verification suite**
+- [x] **Step 5: Run the full verification suite**
 
 Run: `npm test`
 
@@ -148,13 +148,13 @@ Run: `git diff --check`
 
 Expected: exit code 0 and no whitespace errors.
 
-- [ ] **Step 6: Verify the worker remains scheduled and CT-00004 was not resubmitted**
+- [x] **Step 6: Verify the worker remains scheduled and CT-00004 was not resubmitted**
 
 Run: `Get-ScheduledTask -TaskName 'FeishuEcommerceVideoWorker' | Get-ScheduledTaskInfo`
 
 Expected: `LastTaskResult` is `0` while the existing worker remains active or completes normally.
 
-- [ ] **Step 7: Commit implementation**
+- [x] **Step 7: Commit implementation**
 
 ```bash
 git add src/worker.js test/worker.test.js docs/superpowers/specs/2026-07-15-video-identity-duration-constraints-design.md docs/superpowers/plans/2026-07-15-video-identity-duration-constraints.md

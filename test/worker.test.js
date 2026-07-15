@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { buildVideoGenerationMessage, collectUrls, chooseArtifactUrl, extractMarkdownUrl, firstOption, linkedRecordId, resolveReferenceSource, rowsFromEnvelope } = require('../src/worker');
+const { buildVideoGenerationMessage, collectUrls, chooseArtifactUrl, extractMarkdownUrl, firstOption, linkedRecordId, probeVideoDuration, resolveReferenceSource, rowsFromEnvelope } = require('../src/worker');
 
 test('extractMarkdownUrl extracts Feishu markdown links', () => {
   assert.equal(extractMarkdownUrl('[视频](https://v.douyin.com/example/)'), 'https://v.douyin.com/example/');
@@ -52,4 +52,13 @@ test('URL-only video task tells 小云雀 to detect duration before generation',
   const message = buildVideoGenerationMessage({ fallbackUrl: 'https://v.douyin.com/example/' });
   assert.match(message, /先读取参考视频并检测其精确时长/);
   assert.match(message, /误差不得超过 1 秒/);
+});
+
+test('video duration probe parses FFmpeg duration output', () => {
+  const fakeSpawn = () => ({ stderr: 'Duration: 00:00:16.70, start: 0.000000, bitrate: 1234 kb/s' });
+  assert.equal(probeVideoDuration('reference.mp4', fakeSpawn), 16.7);
+});
+
+test('video duration probe returns null for unreadable output', () => {
+  assert.equal(probeVideoDuration('reference.mp4', () => ({ stderr: 'Invalid data found' })), null);
 });
