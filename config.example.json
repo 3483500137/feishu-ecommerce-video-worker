@@ -1,0 +1,13 @@
+{
+  "base_token": "your_feishu_base_token",
+  "persona_table_id": "your_persona_table_id",
+  "content_table_id": "your_content_table_id",
+  "persona_image_attachment_field_id": "your_attachment_field_id",
+  "kimi_base_url": "https://api.moonshot.cn/v1",
+  "kimi_model": "kimi-k2.6",
+  "xyq_base_url": "https://xyq.jianying.com",
+  "poll_interval_seconds": 10,
+  "max_poll_minutes": 180,
+  "yt_dlp_path": "C:\\path\\to\\yt-dlp",
+  "xyq_skill_scripts": "C:\\path\\to\\xyq-nest-skill\\scripts"
+}
