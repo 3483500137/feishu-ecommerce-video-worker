@@ -30,7 +30,7 @@
 - Consumes: `personaJobAction(row)` with a normalized Base record object.
 - Produces: one of `'generate'`, `'backfill'`, or `'none'`.
 
-- [ ] **Step 1: Write failing routing tests**
+- [x] **Step 1: Write failing routing tests**
 
 ```js
 test('active persona trigger regenerates even when an old image URL exists', () => {
@@ -50,13 +50,13 @@ test('missing persona attachment passively backfills when not actively triggered
 });
 ```
 
-- [ ] **Step 2: Run tests and verify RED**
+- [x] **Step 2: Run tests and verify RED**
 
 Run: `node --test test/worker.test.js`
 
 Expected: FAIL because `personaJobAction` is not exported/defined.
 
-- [ ] **Step 3: Implement the action selector**
+- [x] **Step 3: Implement the action selector**
 
 ```js
 function personaJobAction(row) {
@@ -66,7 +66,7 @@ function personaJobAction(row) {
 }
 ```
 
-- [ ] **Step 4: Integrate routing in `main`**
+- [x] **Step 4: Integrate routing in `main`**
 
 ```js
 const personaJobs = personas
@@ -87,7 +87,7 @@ for (const { row, action } of personaJobs) {
 
 Export `personaJobAction`, run `node --test test/worker.test.js`, and expect all tests PASS.
 
-- [ ] **Step 5: Commit Task 1**
+- [x] **Step 5: Commit Task 1**
 
 ```bash
 git add src/worker.js test/worker.test.js

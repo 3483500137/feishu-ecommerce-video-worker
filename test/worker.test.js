@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { buildPersonaImagePrompt, buildVideoGenerationMessage, collectUrls, chooseArtifactUrl, extractMarkdownUrl, firstOption, linkedRecordId, probeVideoDuration, resolveReferenceSource, rowsFromEnvelope } = require('../src/worker');
+const { buildPersonaImagePrompt, buildVideoGenerationMessage, collectUrls, chooseArtifactUrl, extractMarkdownUrl, firstOption, linkedRecordId, personaJobAction, probeVideoDuration, resolveReferenceSource, rowsFromEnvelope } = require('../src/worker');
 
 test('extractMarkdownUrl extracts Feishu markdown links', () => {
   assert.equal(extractMarkdownUrl('[视频](https://v.douyin.com/example/)'), 'https://v.douyin.com/example/');
@@ -74,4 +74,20 @@ test('persona image prompt requires real-camera photography and rejects 2D and C
   assert.match(prompt, /20至30岁/);
   assert.match(prompt, /单人全身/);
   assert.match(prompt, /不得出现其他人物/);
+});
+
+test('active persona trigger regenerates even when an old image URL exists', () => {
+  assert.equal(personaJobAction({
+    '是否立刻生成人设': ['是'],
+    '人物形象': [{ file_token: 'old' }],
+    '人物形象链接（内部）': 'https://example.com/old.jpg',
+  }), 'generate');
+});
+
+test('missing persona attachment passively backfills when not actively triggered', () => {
+  assert.equal(personaJobAction({
+    '是否立刻生成人设': ['否'],
+    '人物形象': null,
+    '人物形象链接（内部）': 'https://example.com/old.jpg',
+  }), 'backfill');
 });

@@ -70,6 +70,12 @@ function linkedRecordId(value) {
   return Array.isArray(value) ? value[0]?.id || '' : '';
 }
 
+function personaJobAction(row) {
+  if (firstOption(row['是否立刻生成人设']) === '是') return 'generate';
+  if (!row['人物形象']) return 'backfill';
+  return 'none';
+}
+
 function extractMarkdownUrl(value) {
   if (!value || typeof value !== 'string') return '';
   if (/^https?:\/\//i.test(value)) return value;
@@ -495,8 +501,14 @@ async function main() {
   try {
     const personaFields = ['人设编号', '手机编号', '人设类型', '输入人设要求', '人设', '人物形象链接（内部）', '人物形象', '是否立刻生成人设', '人设生成状态', '形象线程ID', '形象运行ID', '失败原因'];
     let personas = listRecords(CONFIG.persona_table_id, personaFields);
-    const personaJobs = personas.filter((row) => firstOption(row['是否立刻生成人设']) === '是' || !row['人物形象']);
-    for (const row of personaJobs) {
+    const personaJobs = personas
+      .map((row) => ({ row, action: personaJobAction(row) }))
+      .filter((job) => job.action !== 'none');
+    for (const { row, action } of personaJobs) {
+      if (action === 'generate') {
+        await processPersona(row);
+        continue;
+      }
       const recovered = await backfillPersonaAttachment(row).catch((error) => {
         log('人物形象附件恢复失败', { recordId: row.record_id, error: error.message });
         return false;
@@ -524,4 +536,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { buildPersonaImagePrompt, buildVideoGenerationMessage, collectUrls, chooseArtifactUrl, extractMarkdownUrl, firstOption, linkedRecordId, probeVideoDuration, resolveReferenceSource, rowsFromEnvelope };
+module.exports = { buildPersonaImagePrompt, buildVideoGenerationMessage, collectUrls, chooseArtifactUrl, extractMarkdownUrl, firstOption, linkedRecordId, personaJobAction, probeVideoDuration, resolveReferenceSource, rowsFromEnvelope };
