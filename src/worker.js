@@ -76,6 +76,13 @@ function personaJobAction(row) {
   return 'none';
 }
 
+function contentJobAction(row) {
+  if (firstOption(row['是否立刻生成视频']) === '是') return 'generate';
+  if (firstOption(row['生成状态']) !== '生成中') return 'none';
+  if (row['小云雀线程ID'] && row['小云雀运行ID']) return 'resume';
+  return 'generate';
+}
+
 function extractMarkdownUrl(value) {
   if (!value || typeof value !== 'string') return '';
   if (/^https?:\/\//i.test(value)) return value;
@@ -117,6 +124,18 @@ function chooseArtifactUrl(runData, kind) {
     if (preferred || urls[0]) return preferred || urls[0];
   }
   return '';
+}
+
+function inspectXyqRun(runData, kind) {
+  const state = Number(runData?.state);
+  if (state === 3) {
+    const resultUrl = chooseArtifactUrl(runData, kind);
+    if (resultUrl) return { status: 'completed', resultUrl };
+    return { status: 'failed', error: `小云雀任务完成但未找到${kind === 'video' ? '视频' : '图片'}结果` };
+  }
+  if (state === 4) return { status: 'failed', error: `小云雀生成失败: ${runData?.fail_reason || '未知原因'}` };
+  if (state === 5) return { status: 'failed', error: '小云雀任务已取消' };
+  return { status: 'pending' };
 }
 
 function listRecords(tableId, fields) {
@@ -482,6 +501,32 @@ async function processContent(row, personaById) {
   }
 }
 
+async function resumeContent(row) {
+  const recordId = row.record_id;
+  log('恢复视频任务', { recordId, number: row['内容流水号'] });
+  const runData = await getXyqRun(row['小云雀线程ID'], row['小云雀运行ID']);
+  const outcome = inspectXyqRun(runData, 'video');
+  if (outcome.status === 'pending') {
+    log('视频任务仍在生成', { recordId, number: row['内容流水号'] });
+    return;
+  }
+  if (outcome.status === 'failed') {
+    updateRecord(CONFIG.content_table_id, recordId, {
+      '生成状态': '失败',
+      '最终视频': null,
+      '失败原因': outcome.error.slice(0, 1000),
+    });
+    log('恢复视频任务失败', { recordId, error: outcome.error });
+    return;
+  }
+  updateRecord(CONFIG.content_table_id, recordId, {
+    '最终视频': outcome.resultUrl,
+    '生成状态': '已完成',
+    '失败原因': null,
+  });
+  log('恢复视频任务完成', { recordId, number: row['内容流水号'] });
+}
+
 async function main() {
   ensureDirs();
   if (!process.env.XYQ_ACCESS_KEY) throw new Error('缺少用户环境变量 XYQ_ACCESS_KEY');
@@ -530,10 +575,15 @@ async function main() {
 
     personas = listRecords(CONFIG.persona_table_id, personaFields);
     const personaById = new Map(personas.map((row) => [row.record_id, row]));
-    const contentFields = ['内容流水号', '人设', '视频提示词', '参考视频链接', '参考视频文件', '是否立刻生成视频', '生成状态', '小云雀线程ID'];
+    const contentFields = ['内容流水号', '人设', '视频提示词', '参考视频链接', '参考视频文件', '是否立刻生成视频', '生成状态', '小云雀线程ID', '小云雀运行ID'];
     const contents = listRecords(CONFIG.content_table_id, contentFields);
-    const contentJobs = contents.filter((row) => firstOption(row['是否立刻生成视频']) === '是' || (firstOption(row['生成状态']) === '生成中' && !row['小云雀线程ID']));
-    for (const row of contentJobs) await processContent(row, personaById);
+    const contentJobs = contents
+      .map((row) => ({ row, action: contentJobAction(row) }))
+      .filter((job) => job.action !== 'none');
+    for (const { row, action } of contentJobs) {
+      if (action === 'resume') await resumeContent(row);
+      else await processContent(row, personaById);
+    }
     log('本轮扫描完成', { personaJobs: personaJobs.length, contentJobs: contentJobs.length });
   } finally {
     if (lock !== undefined) fs.closeSync(lock);
@@ -548,4 +598,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { buildPersonaImagePrompt, buildVideoGenerationMessage, collectUrls, chooseArtifactUrl, extractMarkdownUrl, firstOption, linkedRecordId, personaJobAction, probeVideoDuration, resolveReferenceSource, rowsFromEnvelope };
+module.exports = { buildPersonaImagePrompt, buildVideoGenerationMessage, collectUrls, chooseArtifactUrl, contentJobAction, extractMarkdownUrl, firstOption, inspectXyqRun, linkedRecordId, personaJobAction, probeVideoDuration, resolveReferenceSource, rowsFromEnvelope };

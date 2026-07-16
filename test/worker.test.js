@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { buildPersonaImagePrompt, buildVideoGenerationMessage, collectUrls, chooseArtifactUrl, extractMarkdownUrl, firstOption, linkedRecordId, personaJobAction, probeVideoDuration, resolveReferenceSource, rowsFromEnvelope } = require('../src/worker');
+const { buildPersonaImagePrompt, buildVideoGenerationMessage, collectUrls, chooseArtifactUrl, contentJobAction, extractMarkdownUrl, firstOption, inspectXyqRun, linkedRecordId, personaJobAction, probeVideoDuration, resolveReferenceSource, rowsFromEnvelope } = require('../src/worker');
 
 function artifactEntry(subType, mediaKey, url, name) {
   return {
@@ -115,4 +115,40 @@ test('missing persona attachment passively backfills when not actively triggered
     '人物形象': null,
     '人物形象链接（内部）': 'https://example.com/old.jpg',
   }), 'backfill');
+});
+
+test('interrupted content with existing 小云雀 IDs resumes instead of regenerating', () => {
+  assert.equal(contentJobAction({
+    '是否立刻生成视频': ['否'],
+    '生成状态': ['生成中'],
+    '小云雀线程ID': 'thread-1',
+    '小云雀运行ID': 'run-1',
+  }), 'resume');
+});
+
+test('orphaned content without complete 小云雀 IDs regenerates', () => {
+  assert.equal(contentJobAction({
+    '是否立刻生成视频': ['否'],
+    '生成状态': ['生成中'],
+    '小云雀线程ID': 'thread-1',
+    '小云雀运行ID': '',
+  }), 'generate');
+});
+
+test('completed existing run returns its final composite artifact', () => {
+  const run = {
+    state: 3,
+    entry_list: [
+      artifactEntry('biz/x_data_video', 'video', 'https://cdn.example.com/clip.mp4', 'clip.mp4'),
+      artifactEntry('biz/x_data_video', 'video', 'https://cdn.example.com/final.mp4', 'final.mp4'),
+    ],
+  };
+  assert.deepEqual(inspectXyqRun(run, 'video'), {
+    status: 'completed',
+    resultUrl: 'https://cdn.example.com/final.mp4',
+  });
+});
+
+test('running existing run remains pending for the next scheduled scan', () => {
+  assert.deepEqual(inspectXyqRun({ state: 2 }, 'video'), { status: 'pending' });
 });
