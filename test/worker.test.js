@@ -79,6 +79,13 @@ test('URL-only video task tells 小云雀 to detect duration before generation',
   assert.match(message, /误差不得超过 1 秒/);
 });
 
+test('video task requires a full-frame 9:16 canvas without landscape side backgrounds', () => {
+  const message = buildVideoGenerationMessage({ referenceDurationSeconds: 16.7 });
+  assert.match(message, /最终成片画布必须严格为 9:16 竖屏/);
+  assert.match(message, /主体画面必须铺满整个竖屏画布/);
+  assert.match(message, /禁止.*横版画布.*模糊复制侧边背景.*镜像延展.*左右补边.*黑边/);
+});
+
 test('video duration probe parses FFmpeg duration output', () => {
   const fakeSpawn = () => ({ stderr: 'Duration: 00:00:16.70, start: 0.000000, bitrate: 1234 kb/s' });
   assert.equal(probeVideoDuration('reference.mp4', fakeSpawn), 16.7);
