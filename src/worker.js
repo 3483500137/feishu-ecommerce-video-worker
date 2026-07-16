@@ -100,11 +100,23 @@ function collectUrls(value, output = []) {
 }
 
 function chooseArtifactUrl(runData, kind) {
-  const urls = collectUrls(runData);
-  const preferred = kind === 'video'
-    ? urls.find((url) => /(?:\.mp4(?:\?|$)|video|mime_type=video)/i.test(url))
-    : urls.find((url) => /(?:\.(?:png|jpe?g|webp)(?:\?|$)|image|mime_type=image)/i.test(url));
-  return preferred || urls.find((url) => !/xyq\.jianying\.com\/home/i.test(url)) || '';
+  const subtype = kind === 'video' ? 'biz/x_data_video' : 'biz/x_data_image';
+  const entries = Array.isArray(runData?.entry_list) ? runData.entry_list : [];
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const contents = Array.isArray(entries[index]?.artifact?.content) ? entries[index].artifact.content : [];
+    const matching = contents.filter((item) => item?.sub_type === subtype);
+    const urls = matching.flatMap((item) => {
+      if (typeof item.data === 'string' && /^[{[]/.test(item.data.trim())) {
+        try { return collectUrls(JSON.parse(item.data)); } catch {}
+      }
+      return collectUrls(item.data);
+    });
+    const preferred = kind === 'video'
+      ? urls.find((url) => /(?:\.mp4(?:\?|$)|mime_type=video)/i.test(url))
+      : urls.find((url) => /(?:\.(?:png|jpe?g|webp)(?:\?|$)|mime_type=image|origin_url)/i.test(url));
+    if (preferred || urls[0]) return preferred || urls[0];
+  }
+  return '';
 }
 
 function listRecords(tableId, fields) {

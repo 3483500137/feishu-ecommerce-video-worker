@@ -4,6 +4,16 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { buildPersonaImagePrompt, buildVideoGenerationMessage, collectUrls, chooseArtifactUrl, extractMarkdownUrl, firstOption, linkedRecordId, personaJobAction, probeVideoDuration, resolveReferenceSource, rowsFromEnvelope } = require('../src/worker');
 
+function artifactEntry(subType, mediaKey, url, name) {
+  return {
+    type: 2,
+    artifact: {
+      name,
+      content: [{ sub_type: subType, data: JSON.stringify({ [mediaKey]: { url } }) }],
+    },
+  };
+}
+
 test('extractMarkdownUrl extracts Feishu markdown links', () => {
   assert.equal(extractMarkdownUrl('[视频](https://v.douyin.com/example/)'), 'https://v.douyin.com/example/');
   assert.equal(extractMarkdownUrl('https://example.com/a.mp4'), 'https://example.com/a.mp4');
@@ -15,15 +25,30 @@ test('row helpers normalize Base values', () => {
   assert.deepEqual(rowsFromEnvelope({ fields: ['A'], data: [['x']], record_id_list: ['rec1'] }), [{ record_id: 'rec1', A: 'x' }]);
 });
 
-test('artifact selection prefers requested media type', () => {
-  const data = { items: [{ url: 'https://example.com/image.png' }, { url: 'https://example.com/video.mp4' }] };
-  assert.equal(chooseArtifactUrl(data, 'video'), 'https://example.com/video.mp4');
-  assert.equal(chooseArtifactUrl(data, 'image'), 'https://example.com/image.png');
-  assert.equal(collectUrls(data).length, 2);
+test('artifact selection ignores prompt URLs and chooses the last composite video', () => {
+  const data = {
+    entry_list: [
+      { type: 1, message: { content: [{ type: 'text', data: '参考：https://v.douyin.com/example/' }] } },
+      artifactEntry('biz/x_data_video', 'video', 'https://cdn.example.com/clip.mp4', 'clip.mp4'),
+      artifactEntry('biz/x_data_video', 'video', 'https://cdn.example.com/final.mp4', 'final_video.mp4'),
+    ],
+  };
+  assert.equal(chooseArtifactUrl(data, 'video'), 'https://cdn.example.com/final.mp4');
+});
+
+test('artifact selection returns empty when a completed run has no video artifact', () => {
+  const data = { entry_list: [{ type: 1, message: { content: [{ type: 'text', data: 'https://v.douyin.com/example/' }] } }] };
+  assert.equal(chooseArtifactUrl(data, 'video'), '');
+});
+
+test('artifact selection reads image artifacts', () => {
+  const data = { entry_list: [artifactEntry('biz/x_data_image', 'image', 'https://cdn.example.com/persona.jpg', 'persona.jpg')] };
+  assert.equal(chooseArtifactUrl(data, 'image'), 'https://cdn.example.com/persona.jpg');
+  assert.equal(collectUrls(data).length, 1);
 });
 
 test('artifact selection decodes escaped ampersands in signed URLs', () => {
-  const data = { url: 'https://example.com/image.png?x=1\\u0026signature=ok' };
+  const data = { entry_list: [artifactEntry('biz/x_data_image', 'image', 'https://example.com/image.png?x=1\\u0026signature=ok', 'persona.png')] };
   assert.equal(chooseArtifactUrl(data, 'image'), 'https://example.com/image.png?x=1&signature=ok');
 });
 

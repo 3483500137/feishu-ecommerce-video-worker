@@ -104,7 +104,7 @@ git commit -m "fix: honor active persona regeneration"
 - Consumes: `chooseArtifactUrl(runData, kind)` where `kind` is `'image'` or `'video'`.
 - Produces: the newest matching artifact URL, or `''` when none exists.
 
-- [ ] **Step 1: Replace the permissive selector test with failing artifact tests**
+- [x] **Step 1: Replace the permissive selector test with failing artifact tests**
 
 ```js
 function artifactEntry(subType, mediaKey, url, name) {
@@ -139,13 +139,13 @@ test('artifact selection reads image artifacts', () => {
 });
 ```
 
-- [ ] **Step 2: Run tests and verify RED**
+- [x] **Step 2: Run tests and verify RED**
 
 Run: `node --test test/worker.test.js`
 
 Expected: the last-composite and no-artifact tests FAIL against the permissive selector.
 
-- [ ] **Step 3: Implement strict newest-first artifact selection**
+- [x] **Step 3: Implement strict newest-first artifact selection**
 
 ```js
 function chooseArtifactUrl(runData, kind) {
@@ -164,7 +164,7 @@ function chooseArtifactUrl(runData, kind) {
 }
 ```
 
-- [ ] **Step 4: Run full verification**
+- [x] **Step 4: Run full verification**
 
 Run: `npm test`
 
@@ -178,7 +178,7 @@ Run: `git diff --check`
 
 Expected: exit code 0.
 
-- [ ] **Step 5: Commit Task 2**
+- [x] **Step 5: Commit Task 2**
 
 ```bash
 git add src/worker.js test/worker.test.js docs/superpowers/plans/2026-07-16-strict-artifact-and-persona-regeneration.md
