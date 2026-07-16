@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { buildPersonaImagePrompt, buildVideoGenerationMessage, collectUrls, chooseArtifactUrl, contentJobAction, extractMarkdownUrl, firstOption, inspectXyqRun, linkedRecordId, personaJobAction, probeVideoDuration, resolveReferenceSource, rowsFromEnvelope } = require('../src/worker');
+const { buildPersonaImagePrompt, buildVideoGenerationMessage, collectUrls, chooseArtifactUrl, contentJobAction, extractMarkdownUrl, firstOption, inspectXyqRun, linkedRecordId, personaJobAction, probeVideoDuration, resolveReferenceSource, rowsFromEnvelope, videoModelChoice } = require('../src/worker');
 
 function artifactEntry(subType, mediaKey, url, name) {
   return {
@@ -84,6 +84,33 @@ test('video task requires a full-frame 9:16 canvas without landscape side backgr
   assert.match(message, /最终成片画布必须严格为 9:16 竖屏/);
   assert.match(message, /主体画面必须铺满整个竖屏画布/);
   assert.match(message, /禁止.*横版画布.*模糊复制侧边背景.*镜像延展.*左右补边.*黑边/);
+});
+
+test('video model defaults to Seedance 2.0 Fast when the Base field is empty', () => {
+  assert.deepEqual(videoModelChoice(''), {
+    name: 'Seedance 2.0 Fast',
+    id: 'seedance2.0_fast_vision',
+  });
+});
+
+test('video model selection maps every Base option to an explicit backend model', () => {
+  assert.deepEqual(videoModelChoice(['Seedance 2.0']), {
+    name: 'Seedance 2.0',
+    id: 'seedance2.0_vision',
+  });
+  assert.deepEqual(videoModelChoice(['Seedance 2.0 Mini']), {
+    name: 'Seedance 2.0 Mini',
+    id: 'Seedance_2.0_mini',
+  });
+});
+
+test('video task explicitly requires the selected model', () => {
+  const message = buildVideoGenerationMessage({
+    referenceDurationSeconds: 15,
+    videoModel: ['Seedance 2.0 Mini'],
+  });
+  assert.match(message, /必须且只能使用指定视频模型：Seedance 2\.0 Mini/);
+  assert.match(message, /模型标识：Seedance_2\.0_mini/);
 });
 
 test('video duration probe parses FFmpeg duration output', () => {

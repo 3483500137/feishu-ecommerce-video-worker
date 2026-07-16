@@ -70,6 +70,16 @@ function linkedRecordId(value) {
   return Array.isArray(value) ? value[0]?.id || '' : '';
 }
 
+function videoModelChoice(value) {
+  const selected = firstOption(value);
+  const models = {
+    'Seedance 2.0': { name: 'Seedance 2.0', id: 'seedance2.0_vision' },
+    'Seedance 2.0 Fast': { name: 'Seedance 2.0 Fast', id: 'seedance2.0_fast_vision' },
+    'Seedance 2.0 Mini': { name: 'Seedance 2.0 Mini', id: 'Seedance_2.0_mini' },
+  };
+  return models[selected] || models['Seedance 2.0 Fast'];
+}
+
 function personaJobAction(row) {
   if (firstOption(row['是否立刻生成人设']) === '是') return 'generate';
   if (!row['人物形象']) return 'backfill';
@@ -207,12 +217,14 @@ async function resolveReferenceSource({ attachmentFile, referenceUrl, download }
   }
 }
 
-function buildVideoGenerationMessage({ referenceDurationSeconds, fallbackUrl = '', videoPrompt = '' }) {
+function buildVideoGenerationMessage({ referenceDurationSeconds, fallbackUrl = '', videoPrompt = '', videoModel = '' }) {
+  const model = videoModelChoice(videoModel);
   const durationInstruction = Number.isFinite(referenceDurationSeconds)
     ? `参考视频检测时长为 ${referenceDurationSeconds.toFixed(3)} 秒。最终视频必须与参考视频时长一致，误差不得超过 1 秒。`
     : '生成前必须先读取参考视频并检测其精确时长；最终视频必须以检测到的参考时长为准，误差不得超过 1 秒。';
   return [
     '使用已上传的所选人设形象和参考视频生成最终视频。',
+    `必须且只能使用指定视频模型：${model.name}；模型标识：${model.id}。不得自动改用其他模型。`,
     '已上传的所选人设图片是最终视频的唯一人物形象来源。必须把参考视频中的人物完整替换为该人设；不得保留或混合参考视频原人物的脸、五官、发型、年龄、服装、体型和气质。',
     '参考视频原人物仅用于提供动作、口型、走位和时间点，不得作为人物外观来源。',
     '最终成片画布必须严格为 9:16 竖屏，建议分辨率为 1080×1920 或 720×1280；主体画面必须铺满整个竖屏画布并延伸到四边。',
@@ -477,6 +489,7 @@ async function processContent(row, personaById) {
       referenceDurationSeconds,
       fallbackUrl: referenceSource.fallbackUrl,
       videoPrompt: row['视频提示词'] || '',
+      videoModel: row['模型选用'],
     });
 
     const result = await completeXyqTask({
@@ -577,8 +590,14 @@ async function main() {
 
     personas = listRecords(CONFIG.persona_table_id, personaFields);
     const personaById = new Map(personas.map((row) => [row.record_id, row]));
-    const contentFields = ['内容流水号', '人设', '视频提示词', '参考视频链接', '参考视频文件', '是否立刻生成视频', '生成状态', '小云雀线程ID', '小云雀运行ID'];
+    const contentFields = ['内容流水号', '人设', '视频提示词', '参考视频链接', '参考视频文件', '模型选用', '是否立刻生成视频', '生成状态', '小云雀线程ID', '小云雀运行ID'];
     const contents = listRecords(CONFIG.content_table_id, contentFields);
+    for (const row of contents) {
+      if (!firstOption(row['模型选用'])) {
+        row['模型选用'] = 'Seedance 2.0 Fast';
+        updateRecord(CONFIG.content_table_id, row.record_id, { '模型选用': 'Seedance 2.0 Fast' });
+      }
+    }
     const contentJobs = contents
       .map((row) => ({ row, action: contentJobAction(row) }))
       .filter((job) => job.action !== 'none');
@@ -600,4 +619,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { buildPersonaImagePrompt, buildVideoGenerationMessage, collectUrls, chooseArtifactUrl, contentJobAction, extractMarkdownUrl, firstOption, inspectXyqRun, linkedRecordId, personaJobAction, probeVideoDuration, resolveReferenceSource, rowsFromEnvelope };
+module.exports = { buildPersonaImagePrompt, buildVideoGenerationMessage, collectUrls, chooseArtifactUrl, contentJobAction, extractMarkdownUrl, firstOption, inspectXyqRun, linkedRecordId, personaJobAction, probeVideoDuration, resolveReferenceSource, rowsFromEnvelope, videoModelChoice };
