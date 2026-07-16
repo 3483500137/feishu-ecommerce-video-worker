@@ -195,28 +195,28 @@ git commit -m "fix: select only final generated artifacts"
 - PS-0002 record ID: `recvpfdmGM6JkC`
 - CT-00005 record ID: `recvpqWoaYFxWp`
 
-- [ ] **Step 1: Reset the two records for one retry**
+- [x] **Step 1: Reset the two records for one retry**
 
 ```powershell
 lark-cli base +record-upsert --base-token S5gabIRksaJNRmsmGR3cDUNBnTf --table-id tblZrkzhn0ci5dJT --record-id recvpfdmGM6JkC --json '{"是否立刻生成人设":"是","人设生成状态":"待生成","失败原因":null}' --as user --format json
 lark-cli base +record-upsert --base-token S5gabIRksaJNRmsmGR3cDUNBnTf --table-id tblEjufPDjnVGOQJ --record-id recvpqWoaYFxWp --json '{"是否立刻生成视频":"是","生成状态":"待生成","最终视频":null,"小云雀线程ID":null,"小云雀运行ID":null,"生成任务链接":null,"失败原因":null}' --as user --format json
 ```
 
-- [ ] **Step 2: Enable and start the scheduled worker**
+- [x] **Step 2: Enable and start the scheduled worker**
 
 ```powershell
 Enable-ScheduledTask -TaskName 'FeishuEcommerceVideoWorker'
 Start-ScheduledTask -TaskName 'FeishuEcommerceVideoWorker'
 ```
 
-- [ ] **Step 3: Monitor PS-0002 to a terminal state**
+- [x] **Step 3: Monitor PS-0002 to a terminal state**
 
 Poll the Base record and 小云雀 run. On success, download its current `人物形象` attachment and inspect it visually. Accept only a real-camera adult woman photograph; reject 2D illustration and CG digital-human output.
 
-- [ ] **Step 4: Monitor CT-00005 to a terminal state**
+- [x] **Step 4: Monitor CT-00005 to a terminal state**
 
 Poll the Base record and 小云雀 run. On success, verify `最终视频` equals the newest video artifact URL and is not the reference Douyin URL. On no artifact, verify status is `失败`, `最终视频` is empty, and `失败原因` explains that no video result was found.
 
-- [ ] **Step 5: Final verification**
+- [x] **Step 5: Final verification**
 
 Run `npm test`, confirm the scheduled task is Ready with `LastTaskResult=0`, confirm `git status --short` contains only the pre-existing untracked `scripts/run-worker-hidden.vbs`, and leave the scheduled task enabled.
