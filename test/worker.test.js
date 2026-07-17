@@ -86,10 +86,10 @@ test('video task requires a full-frame 9:16 canvas without landscape side backgr
   assert.match(message, /禁止.*横版画布.*模糊复制侧边背景.*镜像延展.*左右补边.*黑边/);
 });
 
-test('video model defaults to Seedance 2.0 Fast when the Base field is empty', () => {
+test('video model defaults to Seedance 2.0 Mini when the Base field is empty', () => {
   assert.deepEqual(videoModelChoice(''), {
-    name: 'Seedance 2.0 Fast',
-    id: 'seedance2.0_fast_vision',
+    name: 'Seedance 2.0 Mini',
+    id: 'Seedance_2.0_mini',
   });
 });
 

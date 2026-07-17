@@ -77,7 +77,7 @@ function videoModelChoice(value) {
     'Seedance 2.0 Fast': { name: 'Seedance 2.0 Fast', id: 'seedance2.0_fast_vision' },
     'Seedance 2.0 Mini': { name: 'Seedance 2.0 Mini', id: 'Seedance_2.0_mini' },
   };
-  return models[selected] || models['Seedance 2.0 Fast'];
+  return models[selected] || models['Seedance 2.0 Mini'];
 }
 
 function personaJobAction(row) {
@@ -594,8 +594,8 @@ async function main() {
     const contents = listRecords(CONFIG.content_table_id, contentFields);
     for (const row of contents) {
       if (!firstOption(row['模型选用'])) {
-        row['模型选用'] = 'Seedance 2.0 Fast';
-        updateRecord(CONFIG.content_table_id, row.record_id, { '模型选用': 'Seedance 2.0 Fast' });
+        row['模型选用'] = 'Seedance 2.0 Mini';
+        updateRecord(CONFIG.content_table_id, row.record_id, { '模型选用': 'Seedance 2.0 Mini' });
       }
     }
     const contentJobs = contents
