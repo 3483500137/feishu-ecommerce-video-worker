@@ -1,3 +1,13 @@
 runtime/
 logs/
 config.json
+node_modules/
+.env
+.env.*
+*.log
+*.mp4
+*.mov
+*.webm
+*.part
+.DS_Store
+Thumbs.db
