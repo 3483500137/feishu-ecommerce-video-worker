@@ -67,7 +67,7 @@
 记录 `recvpCDSGTWH4k` 恢复为：
 
 - 发布状态：发布失败
-- MultiPost任务ID：`mpx-20260717102240710-cvpCDSGTWH4k`
+- MultiPost任务ID：`mpx-example-task-id`
 - 确认发布：是
 - 失败原因：任务已下发，但 MultiPost 扩展未完成实际发布或结果回传；已确认快手端无该作品，可在扩展重新加载后选择“重试发布”
 - 保留原幂等键，防止“是”再次触发旧任务。
