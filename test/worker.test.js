@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { buildLtxAnalysisRequest, buildLtxCompletedPatch, buildLtxFailedPatch, buildLtxPayload, buildLtxStartPatch, buildPersonaImagePrompt, buildPersonaImageRequest, buildPublishAttempt, buildPublishCopyPrompt, buildVideoGenerationMessage, collectUrls, chooseArtifactUrl, contentJobAction, extractMarkdownUrl, firstOption, formatPublishTags, inspectLtxTask, inspectXyqRun, linkedRecordId, ltxJobAction, ltxModelChoice, ltxReferenceUrl, parsePublishCopy, personaJobAction, platformPublishJobAction, probeVideoDuration, processConfirmedPublish, readVideoDataUrl, requestLtxStoryboard, resolveReferenceSource, rowsFromEnvelope, videoModelChoice } = require('../src/worker');
+const { buildInvalidPublishPatch, buildOrphanedPublishTaskPatch, buildLtxAnalysisRequest, buildLtxCompletedPatch, buildLtxFailedPatch, buildLtxPayload, buildLtxStartPatch, buildPersonaImagePrompt, buildPersonaImageRequest, buildPublishAttempt, buildPublishCopyPrompt, buildRelaySegmentPrompt, buildVideoGenerationMessage, collectUrls, chooseArtifactUrl, completeContentVideo, contentJobAction, downloadHttp, extractDouyinShareVideo, extractMarkdownUrl, firstOption, formatPublishTags, hydrateRelayPersona, inspectLtxTask, inspectXyqRun, linkedRecordId, ltxJobAction, ltxModelChoice, ltxReferenceUrl, parsePublishCopy, personaJobAction, platformPublishJobAction, probeVideoDuration, processConfirmedPublish, readVideoDataUrl, relaySegmentPlan, relaySegmentSecondsForAccess, relaySegmentTimeline, relayTaskDescriptor, requestLtxStoryboard, resolveDouyinShareVideo, resolveReferenceSource, resolveFieldIds, rowsFromEnvelope, serializeRelayTaskDescriptor, videoModelChoice } = require('../src/worker');
 
 function artifactEntry(subType, mediaKey, url, name) {
   return {
@@ -16,6 +16,26 @@ function artifactEntry(subType, mediaKey, url, name) {
     },
   };
 }
+
+test('中转站参考视频任务把关联人设解析为完整人设正文', () => {
+  const relayRow = {
+    '生成方式': ['参考视频生成'],
+    '人设': [{ id: 'rec-persona-1' }],
+  };
+  const personaById = new Map([[
+    'rec-persona-1',
+    {
+      '人设': '23岁武术少女，黑色长发，绿白中式长裙，清纯但英气。',
+      '人物形象链接（内部）': 'https://files.example/persona.png',
+    },
+  ]]);
+
+  const hydrated = hydrateRelayPersona(relayRow, personaById);
+
+  assert.equal(hydrated['人设'], '23岁武术少女，黑色长发，绿白中式长裙，清纯但英气。');
+  assert.equal(hydrated['人设图片链接'], 'https://files.example/persona.png');
+  assert.deepEqual(relayRow['人设'], [{ id: 'rec-persona-1' }]);
+});
 
 test('LTX status patches never overwrite the final-video attachment field', () => {
   const start = buildLtxStartPatch({
@@ -94,6 +114,88 @@ test('extractMarkdownUrl extracts Feishu markdown links', () => {
   assert.equal(extractMarkdownUrl('https://example.com/a.mp4'), 'https://example.com/a.mp4');
 });
 
+test('extractDouyinShareVideo reads playable URL and duration from share HTML', () => {
+  const html = '"video":{"play_addr":{"uri":"v0","url_list":["https:\\u002F\\u002Faweme.snssdk.com\\u002Faweme\\u002Fv1\\u002Fplaywm\\u002F?video_id=v0&amp;ratio=720p"]},"duration":20734}';
+  const result = extractDouyinShareVideo(html);
+
+  assert.equal(result.url, 'https://aweme.snssdk.com/aweme/v1/playwm/?video_id=v0&ratio=720p');
+  assert.equal(result.durationSeconds, 20.734);
+});
+
+test('resolveDouyinShareVideo follows the play redirect to an mp4 URL', async () => {
+  const calls = [];
+  const fetchImpl = async (url, options = {}) => {
+    calls.push({ url, options });
+    if (url === 'https://v.douyin.com/demo/') {
+      return new Response('"video":{"play_addr":{"uri":"v0","url_list":["https:\\u002F\\u002Faweme.snssdk.com\\u002Faweme\\u002Fv1\\u002Fplaywm\\u002F?video_id=v0"]},"duration":6100}', {
+        status: 200,
+        headers: { 'Content-Type': 'text/html' },
+      });
+    }
+    return new Response('', {
+      status: 302,
+      headers: { Location: 'https://v3-dy.example/video.mp4?mime_type=video_mp4' },
+    });
+  };
+
+  const result = await resolveDouyinShareVideo('https://v.douyin.com/demo/', { fetchImpl });
+
+  assert.equal(result.url, 'https://v3-dy.example/video.mp4?mime_type=video_mp4');
+  assert.equal(result.durationSeconds, 6.1);
+  assert.equal(calls[1].url, 'https://aweme.snssdk.com/aweme/v1/playwm/?video_id=v0');
+});
+
+test('relay long reference videos are split into continuous bounded segments', () => {
+  const timeline = relaySegmentTimeline(20.734, 15);
+
+  assert.deepEqual(timeline, [
+    { index: 0, start: 0, end: 10.367, duration: 10.367 },
+    { index: 1, start: 10.367, end: 20.734, duration: 10.367 },
+  ]);
+  const prompt = buildRelaySegmentPrompt({
+    basePrompt: '完整替换人物并逐镜复刻',
+    segment: timeline[1],
+    totalSegments: timeline.length,
+  });
+  assert.match(prompt, /第 2\/2 段/);
+  assert.match(prompt, /10\.367 秒到 20\.734 秒/);
+  assert.match(prompt, /不得从第 0 秒重新开始/);
+});
+
+test('every relay reference above 15 seconds uses exactly two segments with overlap for a natural handoff', () => {
+  assert.equal(relaySegmentSecondsForAccess({ videoApiStyle: 'apimesh-videos-generations' }), 15);
+  const plan = relaySegmentPlan(17, 15, 0.5);
+
+  assert.deepEqual(plan, [
+    { index: 0, start: 0, end: 8.5, duration: 8.5, inputStart: 0, inputDuration: 8.5, trimLeadingSeconds: 0 },
+    { index: 1, start: 8.5, end: 17, duration: 8.5, inputStart: 8, inputDuration: 9, trimLeadingSeconds: 0.5 },
+  ]);
+  const prompt = buildRelaySegmentPrompt({ basePrompt: '逐镜复刻', segment: plan[1], totalSegments: plan.length });
+  assert.match(prompt, /0\.500 秒衔接上下文/);
+  assert.match(prompt, /禁止把它重新作为新的开场/);
+  assert.deepEqual(relaySegmentPlan(30, 15, 0), [
+    { index: 0, start: 0, end: 15, duration: 15, inputStart: 0, inputDuration: 15, trimLeadingSeconds: 0 },
+    { index: 1, start: 15, end: 30, duration: 15, inputStart: 15, inputDuration: 15, trimLeadingSeconds: 0 },
+  ]);
+  assert.throws(() => relaySegmentPlan(30.001, 15), /裁剪至 30 秒以内/);
+});
+
+test('relay segmented task descriptors round-trip through the external task field', () => {
+  const descriptor = {
+    mode: 'segmented',
+    taskIds: ['task-1', 'task-2'],
+    assetKeys: ['rec-segment-a.mp4'],
+    durationSeconds: 20.734,
+    segmentSeconds: 15,
+  };
+  const serialized = serializeRelayTaskDescriptor(descriptor);
+
+  assert.deepEqual(relayTaskDescriptor(serialized), { ...descriptor, segmentPlan: [] });
+  assert.deepEqual(relayTaskDescriptor('task-single').taskIds, ['task-single']);
+  const audioMux = { mode: 'single-audio-mux', taskIds: ['task-audio'], assetKeys: [], durationSeconds: 14.118 };
+  assert.deepEqual(relayTaskDescriptor(serializeRelayTaskDescriptor(audioMux)), { ...audioMux, segmentSeconds: 15, segmentPlan: [] });
+});
+
 test('LTX reference input accepts only a downloadable HTTP URL', () => {
   assert.equal(
     ltxReferenceUrl('[抖音视频](https://v.douyin.com/dbpH-qOS8EU/) '),
@@ -107,6 +209,13 @@ test('row helpers normalize Base values', () => {
   assert.equal(firstOption(['是']), '是');
   assert.equal(linkedRecordId([{ id: 'rec123' }]), 'rec123');
   assert.deepEqual(rowsFromEnvelope({ fields: ['A'], data: [['x']], record_id_list: ['rec1'] }), [{ record_id: 'rec1', A: 'x' }]);
+});
+
+test('record reads resolve Chinese field names to the current Base field IDs', () => {
+  assert.deepEqual(resolveFieldIds(['内容流水号', 'fld-known', '不存在字段'], [
+    { id: 'fld-number', name: '内容流水号' },
+    { id: 'fld-known', name: '视频提示词' },
+  ]), ['fld-number', 'fld-known', '不存在字段']);
 });
 
 test('complete platform publish input with blank copy starts Kimi generation', () => {
@@ -152,6 +261,38 @@ test('confirmed completed platform publish copy starts a real publish', () => {
   }), 'publish');
 });
 
+test('confirmed completed platform publish copy also starts when status was accidentally blank', () => {
+  assert.equal(platformPublishJobAction({
+    '内容': [{ id: 'content-1' }],
+    '平台账号': [{ id: 'account-1' }],
+    '最终视频': 'https://example.com/final.mp4',
+    '发布标题': '标题',
+    '发布文案': '文案',
+    '标签': '#龙华商汇 #短视频',
+    '文案生成状态': ['已完成'],
+    '确认发布': ['是'],
+    '发布状态': null,
+    'MultiPost任务ID': '',
+    '幂等键': '',
+  }), 'publish');
+});
+
+test('correcting an invalid first publish from retry to yes starts even when status is failed', () => {
+  assert.equal(platformPublishJobAction({
+    '内容': [{ id: 'content-1' }],
+    '平台账号': [{ id: 'account-1' }],
+    '最终视频': 'https://example.com/final.mp4',
+    '发布标题': '标题',
+    '发布文案': '文案',
+    '标签': '#龙华商汇 #短视频',
+    '文案生成状态': ['已完成'],
+    '确认发布': ['是'],
+    '发布状态': ['发布失败'],
+    'MultiPost任务ID': '',
+    '幂等键': '',
+  }), 'publish');
+});
+
 test('existing MultiPost task prevents duplicate publishing', () => {
   assert.equal(platformPublishJobAction({
     '内容': [{ id: 'content-1' }],
@@ -181,6 +322,38 @@ test('failed MultiPost task can be retried only through the explicit retry optio
   }), 'retry');
 });
 
+test('explicit retry recovers a dispatched task whose Base status was manually cleared', () => {
+  assert.equal(platformPublishJobAction({
+    '发布标题': '标题',
+    '发布文案': '文案',
+    '标签': '#龙华商汇 #短视频',
+    '文案生成状态': ['已完成'],
+    '确认发布': ['重试发布'],
+    '发布状态': null,
+    'MultiPost任务ID': 'mpx-existing',
+    '幂等键': 'mpx-existing-key',
+  }), 'retry');
+});
+
+test('confirmed publish with a blank status and existing MultiPost task is surfaced for controlled retry', () => {
+  const row = {
+    '发布标题': '标题',
+    '发布文案': '文案',
+    '标签': '#龙华商汇 #短视频',
+    '文案生成状态': ['已完成'],
+    '确认发布': ['是'],
+    '发布状态': null,
+    'MultiPost任务ID': 'mpx-existing',
+    '幂等键': 'mpx-existing-key',
+  };
+
+  assert.equal(platformPublishJobAction(row), 'orphaned-task');
+  const patch = buildOrphanedPublishTaskPatch(row);
+  assert.equal(patch['发布状态'], '发布失败');
+  assert.match(patch['失败原因'], /已有 MultiPost任务ID/);
+  assert.match(patch['失败原因'], /重试发布/);
+});
+
 test('retry option does not bypass status and task-history safeguards', () => {
   const base = {
     '发布标题': '标题',
@@ -200,6 +373,25 @@ test('retry option does not bypass status and task-history safeguards', () => {
     'MultiPost任务ID': '',
     '幂等键': '',
   }), 'none');
+});
+
+test('retry option without a historical task is surfaced as a visible publish failure', () => {
+  const row = {
+    '发布标题': '标题',
+    '发布文案': '文案',
+    '标签': '#龙华商汇 #短视频',
+    '文案生成状态': ['已完成'],
+    '确认发布': ['重试发布'],
+    '发布状态': null,
+    'MultiPost任务ID': '',
+    '幂等键': '',
+  };
+
+  assert.equal(platformPublishJobAction(row), 'invalid-retry');
+  assert.deepEqual(buildInvalidPublishPatch(row), {
+    '发布状态': '发布失败',
+    '失败原因': '重试发布缺少历史 MultiPost任务ID；首次发布请将“确认发布”改为“是”。',
+  });
 });
 
 test('retry preparation consumes the retry option and increments the attempt once', () => {
@@ -281,6 +473,11 @@ test('artifact selection decodes escaped ampersands in signed URLs', () => {
   assert.equal(chooseArtifactUrl(data, 'image'), 'https://example.com/image.png?x=1&signature=ok');
 });
 
+test('extractMarkdownUrl reads links from pasted short-video share text', () => {
+  const text = '6.61 u@F.hb :7pm 11/20 jPk:/ 一身沉气 [https://v.douyin.com/fxwMMjgLGMY/](https://v.douyin.com/fxwMMjgLGMY/) 复制此链接';
+  assert.equal(extractMarkdownUrl(text), 'https://v.douyin.com/fxwMMjgLGMY/');
+});
+
 test('falls back to the reference URL when downloading the video fails', async () => {
   const result = await resolveReferenceSource({
     attachmentFile: '',
@@ -300,6 +497,14 @@ test('video task message uses the selected persona as the only identity and incl
   assert.match(message, /不得保留或混合参考视频原人物/);
   assert.match(message, /16\.700 秒/);
   assert.match(message, /误差不得超过 1 秒/);
+});
+
+test('video task message forbids segment repetition and requires a continuous reference timeline', () => {
+  const message = buildVideoGenerationMessage({ referenceDurationSeconds: 16.7 });
+  assert.match(message, /从 0 秒到结尾/);
+  assert.match(message, /第二段必须承接第一段之后的参考视频内容/);
+  assert.match(message, /不得把第一段动作、镜头或画面复制到第二段/);
+  assert.match(message, /不得循环、回放或重新开始/);
 });
 
 test('URL-only video task tells 小云雀 to detect duration before generation', () => {
@@ -331,6 +536,15 @@ test('video model selection maps every Base option to an explicit backend model'
     name: 'Seedance 2.0 Mini',
     id: 'Seedance_2.0_mini',
   });
+});
+
+test('video message keeps a dynamically selected access model instead of falling back to Mini', () => {
+  const message = buildVideoGenerationMessage({
+    videoModel: { name: '部署者视频模型', id: 'custom-video-v2' },
+  });
+  assert.match(message, /部署者视频模型/);
+  assert.match(message, /custom-video-v2/);
+  assert.doesNotMatch(message, /Seedance 2\.0 Mini/);
 });
 
 test('video task explicitly requires the selected model', () => {
@@ -546,6 +760,127 @@ test('completed existing run returns its final composite artifact', () => {
     status: 'completed',
     resultUrl: 'https://cdn.example.com/final.mp4',
   });
+});
+
+test('content completion uploads final video into an online-preview attachment when configured', async () => {
+  const calls = [];
+  await completeContentVideo({
+    tableId: 'tbl-content',
+    recordId: 'rec-content',
+    resultUrl: 'https://cdn.example.com/final.mp4?download=true',
+    workDir: 'C:\\runtime\\content-rec',
+    finalVideoAttachmentFieldId: 'fldPreview',
+    downloadHttpFn: async (url, targetBase) => {
+      calls.push(['download', url, targetBase]);
+      return 'C:\\runtime\\content-rec\\final-video.mp4';
+    },
+    replaceAttachmentFn: (tableId, recordId, fieldId, filePath) => {
+      calls.push(['attach', tableId, recordId, fieldId, filePath]);
+    },
+    updateRecordFn: (tableId, recordId, patch) => {
+      calls.push(['update', tableId, recordId, patch]);
+    },
+  });
+
+  assert.deepEqual(calls, [
+    ['download', 'https://cdn.example.com/final.mp4?download=true', 'C:\\runtime\\content-rec\\final-video'],
+    ['attach', 'tbl-content', 'rec-content', 'fldPreview', 'C:\\runtime\\content-rec\\final-video.mp4'],
+    ['update', 'tbl-content', 'rec-content', {
+      '最终视频': 'https://cdn.example.com/final.mp4?download=true',
+      '生成状态': '已完成',
+      '失败原因': null,
+    }],
+  ]);
+});
+
+test('worker launcher uses an explicit node executable and records startup failures', () => {
+  const launcher = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'run-worker.ps1'), 'utf8');
+
+  assert.match(launcher, /nodeCandidates/);
+  assert.match(launcher, /@\(\$nodeCandidates\)\[0\]/);
+  assert.match(launcher, /worker-launcher\.log/);
+  assert.doesNotMatch(launcher, /& node\s+['"]?\.\\src\\worker\.js/);
+  assert.doesNotMatch(launcher, /New-Item[^\n]*-LiteralPath/);
+});
+
+test('worker launcher kills a timed-out worker and removes its stale lock', () => {
+  const launcher = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'run-worker.ps1'), 'utf8');
+
+  assert.match(launcher, /FEISHU_WORKER_TIMEOUT_MINUTES/);
+  assert.match(launcher, /Start-Process/);
+  assert.match(launcher, /WaitForExit/);
+  assert.match(launcher, /Stop-Process\s+-Id\s+\$workerProcess\.Id\s+-Force/);
+  assert.match(launcher, /worker\.lock/);
+});
+
+test('worker lark-cli calls have a transport timeout instead of blocking forever', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'worker.js'), 'utf8');
+  const helper = fs.readFileSync(path.join(__dirname, '..', 'src', 'lark-cli.js'), 'utf8');
+
+  assert.match(source, /invokeLark\(args,\s*\{ root: ROOT, timeoutMs:\s*60_000 \}\)/);
+  assert.match(helper, /timeout:\s*timeoutMs/);
+  assert.match(helper, /ETIMEDOUT/);
+  assert.match(source, /process\.exit\(0\)/);
+});
+
+test('content completion creates the preview download directory', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'content-preview-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  await completeContentVideo({
+    tableId: 'tbl-content',
+    recordId: 'rec-content',
+    resultUrl: 'https://cdn.example.com/final.mp4',
+    workDir: path.join(root, 'nested'),
+    finalVideoAttachmentFieldId: 'fldPreview',
+    downloadHttpFn: async (_url, targetBase) => {
+      assert.equal(fs.existsSync(path.dirname(targetBase)), true);
+      const file = `${targetBase}.mp4`;
+      fs.writeFileSync(file, 'video bytes');
+      return file;
+    },
+    replaceAttachmentFn: () => {},
+    updateRecordFn: () => {},
+  });
+});
+
+test('downloadHttp stores video/mp4 responses with an mp4 extension', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'video-download-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const originalFetch = globalThis.fetch;
+  t.after(() => { globalThis.fetch = originalFetch; });
+  globalThis.fetch = async () => ({
+    ok: true,
+    url: 'https://cdn.example.com/signed/no-extension',
+    headers: { get: (name) => (name.toLowerCase() === 'content-type' ? 'video/mp4' : '') },
+    arrayBuffer: async () => Buffer.from('video bytes'),
+  });
+
+  const file = await downloadHttp('https://cdn.example.com/signed/no-extension', path.join(root, 'final-video'));
+
+  assert.equal(path.extname(file), '.mp4');
+  assert.equal(fs.readFileSync(file, 'utf8'), 'video bytes');
+});
+
+test('downloadHttp uses Douyin-friendly headers for resolved douyinvod media', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'douyin-download-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const originalFetch = globalThis.fetch;
+  t.after(() => { globalThis.fetch = originalFetch; });
+  let capturedOptions;
+  globalThis.fetch = async (_url, options) => {
+    capturedOptions = options;
+    return {
+      ok: true,
+      url: 'https://v3-douyinvod.com/video?mime_type=video_mp4',
+      headers: { get: (name) => (name.toLowerCase() === 'content-type' ? 'video/mp4' : '') },
+      arrayBuffer: async () => Buffer.from('video bytes'),
+    };
+  };
+
+  await downloadHttp('https://v3-douyinvod.com/video?mime_type=video_mp4', path.join(root, 'segment'));
+
+  assert.equal(capturedOptions.headers.Referer, 'https://www.iesdouyin.com/');
+  assert.match(capturedOptions.headers['User-Agent'], /iPhone/);
 });
 
 test('running existing run remains pending for the next scheduled scan', () => {

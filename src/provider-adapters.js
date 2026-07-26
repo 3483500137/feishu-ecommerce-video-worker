@@ -27,6 +27,108 @@ function errorCode(status) {
   return status >= 500 ? 'UPSTREAM_UNAVAILABLE' : 'UPSTREAM_REJECTED';
 }
 
+function videoCollectionPath(access) {
+  return {
+    'newapi-video-generations': 'video/generations',
+    'apimesh-videos-generations': 'videos/generations',
+  }[access?.videoApiStyle] || 'videos';
+}
+
+function videoContentFromPayload(payload = {}, { includeRoles = false } = {}) {
+  const {
+    prompt, image_url: imageUrl, first_frame_url: firstFrameUrl,
+    last_frame_url: lastFrameUrl, reference_video_url: referenceVideoUrl,
+    content: suppliedContent,
+  } = payload || {};
+  const content = Array.isArray(suppliedContent) ? [...suppliedContent] : [];
+  if (!content.length && prompt) content.push({ type: 'text', text: prompt });
+  if (imageUrl) {
+    content.push({
+      type: 'image_url',
+      image_url: { url: imageUrl },
+      ...(includeRoles ? { role: 'reference_image' } : {}),
+    });
+  }
+  if (firstFrameUrl) {
+    content.push({
+      type: 'image_url',
+      image_url: { url: firstFrameUrl },
+      ...(includeRoles ? { role: 'first_frame' } : {}),
+    });
+  }
+  if (lastFrameUrl) {
+    content.push({
+      type: 'image_url',
+      image_url: { url: lastFrameUrl },
+      ...(includeRoles ? { role: 'last_frame' } : {}),
+    });
+  }
+  if (referenceVideoUrl) {
+    content.push({
+      type: 'video_url',
+      video_url: { url: referenceVideoUrl },
+      ...(includeRoles ? { role: 'reference_video' } : {}),
+    });
+  }
+  return content;
+}
+
+function normalizeResolution(payload = {}) {
+  if (payload.resolution) return payload.resolution;
+  const width = Number(payload.width);
+  const height = Number(payload.height);
+  if (Number.isFinite(width) && Number.isFinite(height) && Math.max(width, height) >= 1080) return '1080p';
+  return '720p';
+}
+
+function normalizeApimeshDuration(duration) {
+  const seconds = Number(duration);
+  // APIMesh 的 Seedance 参数把 duration 定义为整数秒。参考视频本身仍会
+  // 以毫秒精度用于分段与拼接；这里只转换模型请求字段，误差最多 0.5 秒。
+  return Number.isFinite(seconds) && seconds > 0 ? Math.max(1, Math.round(seconds)) : undefined;
+}
+
+function videoRequestBody(access, payload, modelId) {
+  if (access?.videoApiStyle === 'newapi-video-generations') {
+    const {
+      prompt, image_url: imageUrl, first_frame_url: firstFrameUrl,
+      last_frame_url: lastFrameUrl, reference_video_url: referenceVideoUrl,
+      content: suppliedContent, aspect_ratio: aspectRatio, width, height, ...parameters
+    } = payload || {};
+    const hasMedia = Boolean(imageUrl || firstFrameUrl || lastFrameUrl || referenceVideoUrl || suppliedContent);
+    const body = {
+      ...parameters,
+      model: modelId,
+      ...(aspectRatio ? { ratio: aspectRatio } : {}),
+      resolution: normalizeResolution(payload),
+    };
+    if (hasMedia) {
+      body.content = videoContentFromPayload(payload, { includeRoles: true });
+    } else if (prompt) {
+      body.prompt = prompt;
+    }
+    return body;
+  }
+
+  if (access?.videoApiStyle !== 'apimesh-videos-generations') {
+    return { ...payload, model: modelId };
+  }
+
+  const {
+    prompt, image_url: imageUrl, first_frame_url: firstFrameUrl,
+    last_frame_url: lastFrameUrl, reference_video_url: referenceVideoUrl,
+    content: suppliedContent, duration: requestedDuration, ...parameters
+  } = payload || {};
+  const content = videoContentFromPayload(payload);
+  const duration = normalizeApimeshDuration(requestedDuration);
+  return {
+    ...parameters,
+    ...(duration ? { duration } : {}),
+    model: modelId,
+    content,
+  };
+}
+
 function createAdapterRegistry({
   fetchImpl = fetch,
   sleepImpl = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
@@ -79,11 +181,15 @@ function createAdapterRegistry({
       return { valid: true, modelFound: models.some((model) => model.id === access.modelId), models };
     },
     complete({ access, secret, messages, ...parameters }) {
+      const body = { model: access.modelId, messages, ...parameters };
+      if (String(access.modelId || '').toLowerCase() === 'kimi-k2.6' && body.temperature !== undefined) {
+        body.temperature = 1;
+      }
       return requestJson({
         url: endpoint(access.baseUrl, 'chat/completions'),
         secret,
         method: 'POST',
-        body: { model: access.modelId, messages, ...parameters },
+        body,
       });
     },
   };
@@ -95,19 +201,21 @@ function createAdapterRegistry({
       return { valid: true, modelFound: models.some((model) => model.id === access.modelId), models };
     },
     async submitVideo({ access, secret, payload = {} }) {
+      const collectionPath = videoCollectionPath(access);
       const raw = await requestJson({
-        url: endpoint(access.baseUrl, 'videos'),
+        url: endpoint(access.baseUrl, collectionPath),
         secret,
         method: 'POST',
-        body: { ...payload, model: access.modelId },
+        body: videoRequestBody(access, payload, access.modelId),
       });
       const taskId = raw?.id || raw?.task_id || raw?.data?.id || raw?.data?.task_id;
       if (!taskId) throw new ProviderError('INVALID_RESPONSE', '视频接口未返回任务ID');
       return { taskId: String(taskId), raw };
     },
     getVideoTask({ access, secret, taskId }) {
+      const collectionPath = videoCollectionPath(access);
       return requestJson({
-        url: endpoint(access.baseUrl, `videos/${encodeURIComponent(taskId)}`),
+        url: endpoint(access.baseUrl, `${collectionPath}/${encodeURIComponent(taskId)}`),
         secret,
         idempotent: true,
       });
@@ -176,5 +284,7 @@ module.exports = {
   ProviderError,
   createAdapterRegistry,
   redact,
+  videoCollectionPath,
+  videoRequestBody,
+  normalizeApimeshDuration,
 };
-

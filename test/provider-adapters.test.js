@@ -41,6 +41,24 @@ test('chat adapter lists models and completes with the selected model', async ()
   assert.equal(calls[0].options.headers.Authorization, 'Bearer sk-local');
 });
 
+test('chat adapter forces temperature 1 for Kimi K2.6', async () => {
+  const calls = [];
+  const fetchImpl = async (url, options = {}) => {
+    calls.push({ url, options });
+    return jsonResponse(200, { choices: [{ message: { content: '完成' } }] });
+  };
+  const adapter = createAdapterRegistry({ fetchImpl, sleepImpl: async () => {} }).get('chat-completions');
+
+  await adapter.complete({
+    access: access('chat-completions', { modelId: 'kimi-k2.6' }),
+    secret: 'sk-local',
+    messages: [{ role: 'user', content: '生成短视频提示词' }],
+    temperature: 0.6,
+  });
+
+  assert.equal(JSON.parse(calls[0].options.body).temperature, 1);
+});
+
 test('videos adapter submits once and polls by external task ID', async () => {
   const calls = [];
   const fetchImpl = async (url, options = {}) => {
@@ -58,6 +76,89 @@ test('videos adapter submits once and polls by external task ID', async () => {
   assert.equal(task.status, 'completed');
   assert.equal(JSON.parse(calls[0].options.body).model, 'video-model');
   assert.match(calls[1].url, /\/videos\/task-123$/);
+});
+
+test('videos adapter supports NewAPI singular video generation paths', async () => {
+  const calls = [];
+  const fetchImpl = async (url, options = {}) => {
+    calls.push({ url, options });
+    return options.method === 'POST'
+      ? jsonResponse(200, { id: 'newapi-task' })
+      : jsonResponse(200, { id: 'newapi-task', status: 'completed' });
+  };
+  const adapter = createAdapterRegistry({ fetchImpl, sleepImpl: async () => {} }).get('videos');
+  const selected = access('videos', { videoApiStyle: 'newapi-video-generations' });
+
+  await adapter.submitVideo({ access: selected, secret: 'secret', payload: { prompt: 'test' } });
+  await adapter.getVideoTask({ access: selected, secret: 'secret', taskId: 'newapi-task' });
+
+  assert.match(calls[0].url, /\/video\/generations$/);
+  assert.match(calls[1].url, /\/video\/generations\/newapi-task$/);
+});
+
+test('NewAPI video generation wraps reference videos in content with roles', async () => {
+  const calls = [];
+  const fetchImpl = async (url, options = {}) => {
+    calls.push({ url, options });
+    return jsonResponse(200, { id: 'newapi-reference-task' });
+  };
+  const adapter = createAdapterRegistry({ fetchImpl, sleepImpl: async () => {} }).get('videos');
+  const selected = access('videos', { videoApiStyle: 'newapi-video-generations' });
+
+  await adapter.submitVideo({
+    access: selected,
+    secret: 'secret',
+    payload: {
+      prompt: '按参考视频逐镜复刻',
+      image_url: 'https://cdn.example/persona.png',
+      reference_video_url: 'https://v.douyin.com/fxwMMjgLGMY/',
+      aspect_ratio: '9:16',
+      width: 1080,
+      height: 1920,
+    },
+  });
+
+  const body = JSON.parse(calls[0].options.body);
+  assert.equal(body.model, 'video-model');
+  assert.equal(body.prompt, undefined);
+  assert.equal(body.reference_video_url, undefined);
+  assert.equal(body.ratio, '9:16');
+  assert.equal(body.resolution, '1080p');
+  assert.deepEqual(body.content, [
+    { type: 'text', text: '按参考视频逐镜复刻' },
+    { type: 'image_url', image_url: { url: 'https://cdn.example/persona.png' }, role: 'reference_image' },
+    { type: 'video_url', video_url: { url: 'https://v.douyin.com/fxwMMjgLGMY/' }, role: 'reference_video' },
+  ]);
+});
+
+test('videos adapter supports APIMesh plural video generation paths and integer durations', async () => {
+  const calls = [];
+  const fetchImpl = async (url, options = {}) => {
+    calls.push({ url, options });
+    return options.method === 'POST'
+      ? jsonResponse(200, { data: { task_id: 'mesh-task' } })
+      : jsonResponse(200, { id: 'mesh-task', status: 'completed' });
+  };
+  const adapter = createAdapterRegistry({ fetchImpl, sleepImpl: async () => {} }).get('videos');
+  const selected = access('videos', { videoApiStyle: 'apimesh-videos-generations' });
+
+  await adapter.submitVideo({
+    access: selected,
+    secret: 'secret',
+    payload: { prompt: 'test', image_url: 'https://cdn.example/first.jpg', duration: 14.118, aspect_ratio: '9:16' },
+  });
+  await adapter.getVideoTask({ access: selected, secret: 'secret', taskId: 'mesh-task' });
+
+  assert.match(calls[0].url, /\/videos\/generations$/);
+  assert.match(calls[1].url, /\/videos\/generations\/mesh-task$/);
+  const body = JSON.parse(calls[0].options.body);
+  assert.equal(body.prompt, undefined);
+  assert.deepEqual(body.content, [
+    { type: 'text', text: 'test' },
+    { type: 'image_url', image_url: { url: 'https://cdn.example/first.jpg' } },
+  ]);
+  assert.equal(body.duration, 14);
+  assert.equal(body.aspect_ratio, '9:16');
 });
 
 test('XYQ adapter uses the skill endpoints and bearer access key', async () => {
@@ -110,4 +211,3 @@ test('unknown protocols fail before making a network request', () => {
   const registry = createAdapterRegistry({ fetchImpl: async () => { throw new Error('must not run'); } });
   assert.throws(() => registry.get('custom-protocol'), /不支持的API协议/);
 });
-

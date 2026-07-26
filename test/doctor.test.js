@@ -15,7 +15,7 @@ test('doctor identifies missing config and secrets without printing their values
   });
   assert.equal(report.ok, false);
   assert.ok(report.items.some((item) => item.name === 'config.json' && item.level === 'error'));
-  assert.ok(report.items.some((item) => item.name === 'XYQ_ACCESS_KEY' && item.level === 'error'));
+  assert.ok(report.items.some((item) => item.name === 'XYQ_ACCESS_KEY' && item.level === 'warning'));
   assert.equal(JSON.stringify(report).includes('super-secret-value'), false);
 });
 test('doctor treats optional publishing dependencies as warnings', () => {

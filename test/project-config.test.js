@@ -24,13 +24,12 @@ test('resolveConfigPath supports an explicit environment override', () => {
 test('validateConfig reports field names without exposing secret values', () => {
   const errors = validateConfig({ base_token: 'your_feishu_base_token' }, { features: ['core'], env: {} });
   assert.ok(errors.some((message) => message.includes('base_token')));
-  assert.ok(errors.some((message) => message.includes('KIMI_API_KEY')));
   assert.equal(errors.join('\n').includes('your_feishu_base_token'), false);
 });
 
 test('validateConfig checks optional LTX settings only when that feature is enabled', () => {
   const errors = validateConfig({}, { features: ['ltx'], env: {} });
   assert.ok(errors.some((message) => message.includes('ltx_content_table_id')));
-  assert.ok(errors.some((message) => message.includes('NEWAPI_API_KEY')));
+  assert.ok(errors.some((message) => message.includes('ltx_final_video_attachment_field_id')));
   assert.equal(errors.some((message) => message.includes('KIMI_API_KEY')), false);
 });

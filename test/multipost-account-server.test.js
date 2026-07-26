@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const {
   buildAccountPatch,
   createAccountServer,
+  publishPage,
   platformLoginUrl,
   platformKeyFor,
 } = require('../src/multipost-account-server');
@@ -61,7 +62,7 @@ test('local endpoint updates exactly the requested Feishu record', async (t) => 
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      recordId: 'recvpBcfDtTfxA',
+      recordId: 'rec-account-request-1',
       platformName: '小红书',
       accountInfo: {
         rednote: {
@@ -76,7 +77,7 @@ test('local endpoint updates exactly the requested Feishu record', async (t) => 
   assert.equal(response.status, 200);
   assert.equal(payload.ok, true);
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].recordId, 'recvpBcfDtTfxA');
+  assert.equal(calls[0].recordId, 'rec-account-request-1');
   assert.equal(calls[0].patch['MultiPost账号ID'], 'user_456');
 });
 
@@ -85,7 +86,7 @@ test('account page includes the trusted-domain and account-info extension action
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   t.after(() => server.close());
   const { port } = server.address();
-  const response = await fetch(`http://127.0.0.1:${port}/multipost/account?record_id=recvpBcfDtTfxA&platform=${encodeURIComponent('快手')}`);
+  const response = await fetch(`http://127.0.0.1:${port}/multipost/account?record_id=rec-account-request-1&platform=${encodeURIComponent('快手')}`);
   const html = await response.text();
   assert.equal(response.status, 200);
   assert.match(html, /MULTIPOST_EXTENSION_REQUEST_TRUST_DOMAIN/);
@@ -96,7 +97,29 @@ test('account page includes the trusted-domain and account-info extension action
   assert.match(html, /未登录时扫码/);
   assert.match(html, /登录完成，刷新账号/);
   assert.match(html, /https:\/\/cp\.kuaishou\.com\/article\/publish\/video/);
-  assert.match(html, /recvpBcfDtTfxA/);
+  assert.match(html, /rec-account-request-1/);
+});
+
+test('account server mounts the local API configuration handler on the same port', async (t) => {
+  let calls = 0;
+  const server = createAccountServer({
+    updatePlatformAccount() {},
+    async apiConfigHandler(request, response, url) {
+      if (url.pathname !== '/api-config') return false;
+      calls += 1;
+      response.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+      response.end('api config mounted');
+      return true;
+    },
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => server.close());
+  const { port } = server.address();
+
+  const response = await fetch(`http://127.0.0.1:${port}/api-config?record_id=recApi12345`);
+  assert.equal(response.status, 200);
+  assert.equal(await response.text(), 'api config mounted');
+  assert.equal(calls, 1);
 });
 
 test('publish bridge claims one queued task and sends the official extension publish action', async (t) => {
@@ -104,7 +127,7 @@ test('publish bridge claims one queued task and sends the official extension pub
     'mpx-test-task',
     {
       taskId: 'mpx-test-task',
-      recordId: 'recvpBGbdaG3LA',
+      recordId: 'rec-publish-request-1',
       status: 'queued',
       payload: {
         platforms: [{ name: 'VIDEO_KUAISHOU' }],
@@ -155,6 +178,46 @@ test('publish bridge claims one queued task and sends the official extension pub
   assert.match(html, /mpx-test-task/);
 });
 
+test('publish bridge refreshes the current Kuaishou account before comparing the binding', async (t) => {
+  const server = createAccountServer({
+    updatePlatformAccount() {},
+    readPublishTask() {
+      return { taskId: 'mpx-refresh-account', status: 'queued' };
+    },
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => server.close());
+  const { port } = server.address();
+
+  const response = await fetch(`http://127.0.0.1:${port}/multipost/publish?task_id=mpx-refresh-account`);
+  const html = await response.text();
+
+  assert.match(html, /MULTIPOST_EXTENSION_REFRESH_KUAISHOU_ACCOUNT_INFO/);
+});
+
+test('publish bridge account mismatch identifies the bound and detected accounts', async (t) => {
+  const server = createAccountServer({
+    updatePlatformAccount() {},
+    readPublishTask() {
+      return { taskId: 'mpx-account-mismatch', status: 'queued' };
+    },
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => server.close());
+  const { port } = server.address();
+
+  const response = await fetch(`http://127.0.0.1:${port}/multipost/publish?task_id=mpx-account-mismatch`);
+  const html = await response.text();
+
+  assert.match(html, /飞书绑定账号：/);
+  assert.match(html, /Chrome 实际账号：/);
+});
+
+test('publish bridge falls back to an exact nickname match when Kuaishou hides the account ID', () => {
+  const html = publishPage('mpx-nickname-fallback');
+  assert.match(html, /actualUsername && actualUsername === expectedUsername/);
+});
+
 test('publish claim endpoint is idempotent', async (t) => {
   let claims = 0;
   const server = createAccountServer({
@@ -190,7 +253,7 @@ test('publish success endpoint writes the verified platform result back to Feish
   const updates = [];
   const task = {
     taskId: 'mpx-test-success',
-    recordId: 'recvpBGbdaG3LA',
+    recordId: 'rec-publish-request-1',
     status: 'dispatched',
   };
   const server = createAccountServer({
@@ -217,7 +280,7 @@ test('publish success endpoint writes the verified platform result back to Feish
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       platformKey: 'kuaishou',
-      titleText: '问你呢，拳好看还是我好看？',
+      titleText: '示例视频标题',
       publishedAt: '2026-07-17 17:02',
     }),
   });
@@ -225,7 +288,7 @@ test('publish success endpoint writes the verified platform result back to Feish
   assert.equal(response.status, 200);
   assert.equal(payload.ok, true);
   assert.deepEqual(updates, [{
-    recordId: 'recvpBGbdaG3LA',
+    recordId: 'rec-publish-request-1',
     patch: {
       '发布状态': '发布成功',
       '实际发布时间': '2026-07-17 17:02',

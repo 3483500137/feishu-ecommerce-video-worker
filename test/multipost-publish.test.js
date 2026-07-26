@@ -18,7 +18,7 @@ const path = require('node:path');
 test('builds the official MultiPost extension payload for Kuaishou auto publish', () => {
   const payload = buildExtensionPublishPayload({
     platform: '快手',
-    title: '问你呢，拳好看还是我好看？',
+    title: '示例视频标题',
     content: '拳风扫过来的时候，我呼吸都停了。',
     tags: '#古风 #武侠 #汉服',
     videoUrl: 'https://cdn.example.com/final.mp4?token=abc',
@@ -27,7 +27,7 @@ test('builds the official MultiPost extension payload for Kuaishou auto publish'
 
   assert.deepEqual(payload.platforms, [{ name: 'VIDEO_KUAISHOU' }]);
   assert.equal(payload.isAutoPublish, true);
-  assert.equal(payload.data.title, '问你呢，拳好看还是我好看？');
+  assert.equal(payload.data.title, '示例视频标题');
   assert.equal(payload.data.content, '拳风扫过来的时候，我呼吸都停了。');
   assert.deepEqual(payload.data.tags, ['古风', '武侠', '汉服']);
   assert.equal(payload.data.video.url, 'https://cdn.example.com/final.mp4?token=abc');
@@ -95,19 +95,19 @@ test('finds and completes the matching recently dispatched publish task', (t) =>
   t.after(() => fs.rmSync(taskDir, { recursive: true, force: true }));
   writePublishTask({
     taskId: 'mpx-test-success',
-    recordId: 'recvpBGbdaG3LA',
+    recordId: 'rec-publish-request-1',
     status: 'queued',
     createdAt: new Date().toISOString(),
-    expectedAccount: { platformKey: 'kuaishou', accountId: '9990000000001' },
+    expectedAccount: { platformKey: 'kuaishou', accountId: '9990001234567' },
     payload: {
-      data: { title: '问你呢，拳好看还是我好看？' },
+      data: { title: '示例视频标题' },
     },
   }, taskDir);
   markPublishTaskDispatched('mpx-test-success', taskDir);
 
   const matching = findLatestDispatchedPublishTask({
     platformKey: 'kuaishou',
-    titleText: '问你呢，拳好看还是我好看？ 拳风扫过来的时候，我呼吸都停了。',
+    titleText: '示例视频标题 这是一段示例发布文案。',
   }, taskDir);
   assert.equal(matching.taskId, 'mpx-test-success');
 

@@ -24,13 +24,9 @@ function log(message) {
 
 function resolveCloudflaredPath(env = process.env) {
   if (env.CLOUDFLARED_PATH && fs.existsSync(env.CLOUDFLARED_PATH)) return env.CLOUDFLARED_PATH;
-  const locator = process.platform === 'win32' ? 'where.exe' : 'which';
-  const located = spawnSync(locator, ['cloudflared'], { encoding: 'utf8', windowsHide: true });
-  const fromPath = String(located.stdout || '').split(/\r?\n/).find((entry) => entry && fs.existsSync(entry));
+  const where = spawnSync('where.exe', ['cloudflared'], { encoding: 'utf8', windowsHide: true });
+  const fromPath = String(where.stdout || '').split(/\r?\n/).find((entry) => entry && fs.existsSync(entry));
   if (fromPath) return fromPath;
-  if (process.platform !== 'win32') {
-    throw new Error('未找到 cloudflared，请先安装或设置 CLOUDFLARED_PATH');
-  }
   const packagesRoot = path.join(env.LOCALAPPDATA || '', 'Microsoft', 'WinGet', 'Packages');
   if (fs.existsSync(packagesRoot)) {
     const packageDir = fs.readdirSync(packagesRoot)

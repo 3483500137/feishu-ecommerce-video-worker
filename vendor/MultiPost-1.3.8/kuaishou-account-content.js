@@ -20,7 +20,6 @@ function buildKuaishouAccount({ username, kwaiId, avatarUrl }) {
   const cleanKwaiId = normalizeKwaiId(kwaiId);
   const generatedId = cleanUsername.match(/(\d{6,})$/u)?.[1] || '';
   const accountId = cleanKwaiId || generatedId;
-  if (!accountId) return null;
 
   return {
     provider: 'kuaishou',

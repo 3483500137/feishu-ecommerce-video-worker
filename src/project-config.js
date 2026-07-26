@@ -47,12 +47,17 @@ function validateConfig(config, { features = ['core'], env = process.env } = {})
   if (features.includes('core')) {
     ['base_token', 'persona_table_id', 'content_table_id', 'persona_image_attachment_field_id']
       .forEach((field) => requiredFields.add(field));
-    ['KIMI_API_KEY', 'XYQ_ACCESS_KEY'].forEach((field) => requiredEnv.add(field));
+  }
+  if (features.includes('api-routing')) {
+    requiredFields.add('access_api_table_id');
+  }
+  if (features.includes('relay')) {
+    ['relay_content_table_id', 'relay_final_video_attachment_field_id']
+      .forEach((field) => requiredFields.add(field));
   }
   if (features.includes('ltx')) {
-    ['ltx_content_table_id', 'ltx_final_video_attachment_field_id', 'ltx_base_url']
+    ['ltx_content_table_id', 'ltx_final_video_attachment_field_id']
       .forEach((field) => requiredFields.add(field));
-    requiredEnv.add('NEWAPI_API_KEY');
   }
   if (features.includes('publishing')) {
     ['platform_account_table_id', 'platform_publish_table_id']

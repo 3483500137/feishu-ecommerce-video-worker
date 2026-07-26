@@ -182,8 +182,8 @@ Expected: all tests pass.
 
 **Files:**
 - No local files.
-- Update Base field `fldRxw2qkI`.
-- Update Base record `recvpCDSGTWH4k`.
+- Update the redacted confirmation field.
+- Update the redacted target record.
 
 **Interfaces:**
 - Consumes: Base token `<REDACTED_BASE_TOKEN>`, table `<REDACTED_PLATFORM_PUBLISH_TABLE_ID>`
@@ -193,8 +193,8 @@ Expected: all tests pass.
 Run:
 
 ```powershell
-lark-cli base +field-get --base-token <REDACTED_BASE_TOKEN> --table-id <REDACTED_PLATFORM_PUBLISH_TABLE_ID> --field-id fldRxw2qkI --as user
-lark-cli base +record-get --base-token <REDACTED_BASE_TOKEN> --table-id <REDACTED_PLATFORM_PUBLISH_TABLE_ID> --record-id recvpCDSGTWH4k --as user
+lark-cli base +field-get --base-token <REDACTED_BASE_TOKEN> --table-id <REDACTED_PLATFORM_PUBLISH_TABLE_ID> --field-id <REDACTED_CONFIRM_FIELD_ID> --as user
+lark-cli base +record-get --base-token <REDACTED_BASE_TOKEN> --table-id <REDACTED_PLATFORM_PUBLISH_TABLE_ID> --record-id <REDACTED_RECORD_ID> --as user
 ```
 
 Expected: “确认发布” is a single select; CT-00008 still has the original idempotency key.

@@ -41,6 +41,7 @@ function runLark(args, {
   root = path.resolve(__dirname, '..'),
   env = process.env,
   asUser = false,
+  timeoutMs = 60_000,
   spawn = spawnSync,
 } = {}) {
   const invocation = resolveLarkCli({ root, env });
@@ -52,8 +53,13 @@ function runLark(args, {
     encoding: 'utf8',
     windowsHide: true,
     maxBuffer: 32 * 1024 * 1024,
+    timeout: timeoutMs,
     env,
   });
+  if (result.error) {
+    if (result.error.code === 'ETIMEDOUT') throw new Error(`飞书 CLI 请求超时（${timeoutMs}ms）`);
+    throw result.error;
+  }
   if (result.status !== 0) {
     throw new Error((result.stderr || result.stdout || 'lark-cli request failed').trim());
   }

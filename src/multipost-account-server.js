@@ -4,6 +4,9 @@ const http = require('http');
 const path = require('path');
 const { assertValidConfig, loadConfig } = require('./project-config');
 const { runLark: invokeLark } = require('./lark-cli');
+const { createApiConfigHandler } = require('./api-config');
+const { createCredentialStore } = require('./credential-store');
+const { createAdapterRegistry } = require('./provider-adapters');
 const {
   claimPublishTask,
   findLatestDispatchedPublishTask,
@@ -18,6 +21,7 @@ const ROOT = path.resolve(__dirname, '..');
 const CONFIG = loadConfig({ root: ROOT });
 const DEFAULT_PORT = 17386;
 const DEFAULT_TABLE_ID = '';
+const DEFAULT_ACCESS_API_TABLE_ID = '';
 
 const PLATFORM_KEYS = Object.freeze({
   '抖音': 'douyin',
@@ -104,6 +108,55 @@ function updatePlatformPublish(recordId, patch) {
     '--record-id', recordId,
     '--json', JSON.stringify(patch),
   ]);
+}
+
+function rowFromRecordEnvelope(data) {
+  const fields = Array.isArray(data?.fields) ? data.fields : [];
+  const values = Array.isArray(data?.data?.[0]) ? data.data[0] : null;
+  if (!values) return null;
+  const row = { record_id: data.record_id_list?.[0] || '' };
+  fields.forEach((field, index) => { row[field] = values[index]; });
+  return row;
+}
+
+function createAccessBaseClient() {
+  const tableId = CONFIG.access_api_table_id || DEFAULT_ACCESS_API_TABLE_ID;
+  const projection = [
+    '接入编号', '接入名称', '服务商类型', 'API协议', '视频接口样式', '接口地址', '模型名称', '模型ID',
+    '模型能力', '本机密钥别名', '密钥尾号', '是否默认', '是否启用', '验证状态',
+  ];
+  return {
+    getAccessRecord(recordId) {
+      const args = [
+        'base', '+record-get', '--base-token', CONFIG.base_token, '--table-id', tableId, '--record-id', recordId,
+      ];
+      for (const field of projection) args.push('--field-id', field);
+      return rowFromRecordEnvelope(runLark(args));
+    },
+    updateAccessRecord(recordId, patch) {
+      return runLark([
+        'base', '+record-upsert', '--base-token', CONFIG.base_token, '--table-id', tableId,
+        '--record-id', recordId, '--json', JSON.stringify(patch),
+      ]);
+    },
+    createAccessRecord(fields) {
+      return runLark([
+        'base', '+record-upsert', '--base-token', CONFIG.base_token, '--table-id', tableId,
+        '--json', JSON.stringify(fields),
+      ]);
+    },
+  };
+}
+
+function createDefaultApiConfigHandler() {
+  const credentialStore = createCredentialStore({
+    filePath: path.join(ROOT, 'runtime', 'credentials.json'),
+  });
+  return createApiConfigHandler({
+    baseClient: createAccessBaseClient(),
+    credentialStore,
+    adapterRegistry: createAdapterRegistry(),
+  });
 }
 
 function jsonResponse(response, statusCode, body) {
@@ -432,7 +485,19 @@ function publishPage(taskId) {
       if (!expected || !expected.platformKey || !expected.accountId) return false;
       const actual = accountInfo && accountInfo[expected.platformKey];
       if (!actual) return false;
-      return String(actual.accountId || '').trim() === String(expected.accountId).trim();
+      const actualAccountId = String(actual.accountId || '').trim();
+      const expectedAccountId = String(expected.accountId || '').trim();
+      if (actualAccountId) return actualAccountId === expectedAccountId;
+      const actualUsername = String(actual.username || '').trim();
+      const expectedUsername = String(expected.username || '').trim();
+      return Boolean(actualUsername && actualUsername === expectedUsername);
+    }
+
+    function accountLabel(account) {
+      if (!account) return '未检测到';
+      const username = String(account.username || '').trim();
+      const accountId = String(account.accountId || '').trim();
+      return [username, accountId ? '(' + accountId + ')' : ''].filter(Boolean).join(' ') || '未检测到';
     }
 
     async function dispatch() {
@@ -441,12 +506,20 @@ function publishPage(taskId) {
         const trust = await requestExtension('MULTIPOST_EXTENSION_REQUEST_TRUST_DOMAIN');
         if (trust.trusted === false) throw new Error('未允许 127.0.0.1 使用 MultiPost 扩展');
         await requestExtension('MULTIPOST_EXTENSION_CHECK_SERVICE_STATUS');
-        const accountResult = await requestExtension('MULTIPOST_EXTENSION_GET_ACCOUNT_INFOS');
         const claim = await post('/api/multipost/publish-task/claim', { taskId });
         claimed = true;
         const task = claim.task;
+        const accountResult = task.expectedAccount?.platformKey === 'kuaishou'
+          ? await requestExtension('MULTIPOST_EXTENSION_REFRESH_KUAISHOU_ACCOUNT_INFO', {}, 10000)
+          : await requestExtension('MULTIPOST_EXTENSION_GET_ACCOUNT_INFOS');
+        if (accountResult.error) throw new Error(accountResult.error);
         if (!accountMatches(task.expectedAccount, accountResult.accountInfo || {})) {
-          throw new Error('当前 Chrome 登录账号与飞书绑定账号不一致，已停止发布');
+          const actualAccount = accountResult.accountInfo?.[task.expectedAccount?.platformKey];
+          throw new Error(
+            '当前 Chrome 登录账号与飞书绑定账号不一致，已停止发布。'
+            + '飞书绑定账号：' + accountLabel(task.expectedAccount) + '；'
+            + 'Chrome 实际账号：' + accountLabel(actualAccount)
+          );
         }
         setStatus('校验通过，正在提交给 MultiPost 扩展并打开平台发布页……');
         notifyExtension('MULTIPOST_EXTENSION_PUBLISH', task.payload);
@@ -509,9 +582,19 @@ function createAccountServer(options = {}) {
   const markFailed = options.markPublishTaskFailed || markPublishTaskFailed;
   const findDispatchedTask = options.findLatestDispatchedPublishTask || findLatestDispatchedPublishTask;
   const markSucceeded = options.markPublishTaskSucceeded || markPublishTaskSucceeded;
+  const apiConfigHandler = options.apiConfigHandler || null;
   return http.createServer(async (request, response) => {
     const host = request.headers.host || `127.0.0.1:${DEFAULT_PORT}`;
     const url = new URL(request.url || '/', `http://${host}`);
+
+    if (apiConfigHandler) {
+      try {
+        if (await apiConfigHandler(request, response, url)) return;
+      } catch (error) {
+        jsonResponse(response, 500, { ok: false, error: error.message || String(error) });
+        return;
+      }
+    }
 
     if (request.method === 'GET' && url.pathname === '/health') {
       jsonResponse(response, 200, { ok: true, service: 'multipost-account' });
@@ -631,9 +714,9 @@ function createAccountServer(options = {}) {
 }
 
 function start() {
-  assertValidConfig(CONFIG, { features: ['publishing'], env: {} });
+  assertValidConfig(CONFIG, { features: ['publishing', 'api-routing'], env: {} });
   const port = Number(CONFIG.multipost_account_port) || DEFAULT_PORT;
-  const server = createAccountServer();
+  const server = createAccountServer({ apiConfigHandler: createDefaultApiConfigHandler() });
   server.listen(port, '127.0.0.1', () => {
     process.stdout.write(`MultiPost account server listening on http://127.0.0.1:${port}\n`);
   });
@@ -647,7 +730,9 @@ module.exports = {
   PLATFORM_KEYS,
   accountPage,
   buildAccountPatch,
+  createAccessBaseClient,
   createAccountServer,
+  createDefaultApiConfigHandler,
   feishuDateTime,
   isValidRecordId,
   platformKeyFor,
