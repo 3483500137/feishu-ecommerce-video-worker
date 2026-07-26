@@ -56,6 +56,27 @@ test('relay media store copies images, returns the active tunnel URL, and remove
   assert.equal(fs.existsSync(path.join(storageDir, uploaded.assetKey)), false);
 });
 
+test('relay media store can publish short mp4 reference segments', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-video-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const storageDir = path.join(root, 'media');
+  const statePath = path.join(root, 'state.json');
+  const source = path.join(root, 'segment.mp4');
+  fs.writeFileSync(source, 'video bytes');
+  fs.writeFileSync(statePath, JSON.stringify({ baseUrl: 'https://video-edge.trycloudflare.com' }));
+  const store = createRelayMediaStore({
+    statePath,
+    storageDir,
+    randomBytes: () => Buffer.from('fedcba9876543210fedcba9876543210', 'hex'),
+    fetchImpl: async () => ({ ok: true }),
+  });
+
+  const uploaded = await store.upload(source, { recordId: 'rec001', role: 'segment-1' });
+
+  assert.equal(uploaded.assetKey, 'rec001-segment-1-fedcba9876543210fedcba9876543210.mp4');
+  assert.equal(fs.readFileSync(path.join(storageDir, uploaded.assetKey), 'utf8'), 'video bytes');
+});
+
 test('relay state must contain a reachable HTTPS TryCloudflare address', async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ltx-relay-state-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));

@@ -13,13 +13,13 @@ test('extracts a Kuaishou account from the visible creator account card', () => 
   const { buildKuaishouAccount } = require(CONTENT_SCRIPT);
 
   assert.deepEqual(buildKuaishouAccount({
-    username: '快手用户9990000000001',
+    username: '快手用户9990001234567',
     kwaiId: '',
     avatarUrl: 'https://example.com/avatar.png',
   }), {
     provider: 'kuaishou',
-    accountId: '9990000000001',
-    username: '快手用户9990000000001',
+    accountId: '9990001234567',
+    username: '快手用户9990001234567',
     description: '',
     profileUrl: 'https://cp.kuaishou.com/profile',
     avatarUrl: 'https://example.com/avatar.png',
@@ -33,7 +33,7 @@ test('extracts a Kuaishou account from the visible creator account card', () => 
 test('prefers the visible Kwai ID over the generated nickname suffix', () => {
   const { buildKuaishouAccount } = require(CONTENT_SCRIPT);
   const account = buildKuaishouAccount({
-    username: '快手用户9990000000001',
+    username: '快手用户9990001234567',
     kwaiId: '快手号：real-kwai-id',
     avatarUrl: '',
   });
@@ -46,18 +46,38 @@ test('does not invent an account when the creator page has no visible username',
   assert.equal(buildKuaishouAccount({ username: '', kwaiId: '', avatarUrl: '' }), null);
 });
 
+test('keeps the visible Kuaishou nickname when the creator page hides the Kwai ID', () => {
+  const { buildKuaishouAccount } = require(CONTENT_SCRIPT);
+  assert.deepEqual(buildKuaishouAccount({
+    username: '示例昵称',
+    kwaiId: '',
+    avatarUrl: '',
+  }), {
+    provider: 'kuaishou',
+    accountId: '',
+    username: '示例昵称',
+    description: '',
+    profileUrl: 'https://cp.kuaishou.com/profile',
+    avatarUrl: '',
+    extraData: {
+      source: 'creator-page-dom',
+      kwaiId: '',
+    },
+  });
+});
+
 test('merges Kuaishou into MultiPost serialized account storage', () => {
   const { mergeAccountStorage } = require(BACKGROUND_SCRIPT);
   const account = {
     provider: 'kuaishou',
-    accountId: '9990000000001',
-    username: '快手用户9990000000001',
+    accountId: '9990001234567',
+    username: '快手用户9990001234567',
   };
   const merged = mergeAccountStorage(JSON.stringify({
     douyin: { provider: 'douyin', accountId: 'dy-1', username: '抖音账号' },
   }), account);
 
-  assert.equal(merged.kuaishou.accountId, '9990000000001');
+  assert.equal(merged.kuaishou.accountId, '9990001234567');
   assert.equal(merged.douyin.accountId, 'dy-1');
 });
 
@@ -73,12 +93,12 @@ test('extension manifest loads the account bridge and wrapper service worker', (
 test('builds a publish result only from a Kuaishou published work card', () => {
   const { buildKuaishouPublishResult } = require(CONTENT_SCRIPT);
   assert.deepEqual(buildKuaishouPublishResult({
-    titleText: '问你呢，拳好看还是我好看？\n发布文案',
+    titleText: '示例视频标题\n示例发布文案',
     status: '已发布',
     publishedAt: '2026-07-17 17:02',
   }), {
     platformKey: 'kuaishou',
-    titleText: '问你呢，拳好看还是我好看？ 发布文案',
+    titleText: '示例视频标题 示例发布文案',
     publishedAt: '2026-07-17 17:02',
   });
   assert.equal(buildKuaishouPublishResult({

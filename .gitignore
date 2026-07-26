@@ -1,4 +1,6 @@
 runtime/
+runtime/credentials.json
+runtime/credentials.json.*.tmp
 logs/
 config.json
 node_modules/

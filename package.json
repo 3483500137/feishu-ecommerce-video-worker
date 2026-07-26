@@ -1,9 +1,13 @@
 {
   "name": "feishu-account-cloning-tool",
   "version": "1.0.0",
-  "description": "飞书账号复刻工具：用飞书多维表格编排人设、仿拍视频与多平台发布",
+  "description": "飞书账号复刻工具：用飞书多维表格编排人设、视频生成与多平台发布",
   "private": true,
   "license": "MIT",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=20"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/3483500137/feishu-ecommerce-video-worker.git"
@@ -13,10 +17,6 @@
   },
   "homepage": "https://github.com/3483500137/feishu-ecommerce-video-worker#readme",
   "keywords": ["feishu", "lark", "video", "persona", "multipost"],
-  "type": "commonjs",
-  "engines": {
-    "node": ">=20"
-  },
   "scripts": {
     "doctor": "node scripts/doctor.js",
     "start": "node src/worker.js --once",

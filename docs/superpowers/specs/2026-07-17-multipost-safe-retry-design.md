@@ -64,7 +64,7 @@
 
 ## CT-00008 修复
 
-记录 `recvpCDSGTWH4k` 恢复为：
+目标记录恢复为：
 
 - 发布状态：发布失败
 - MultiPost任务ID：`mpx-example-task-id`

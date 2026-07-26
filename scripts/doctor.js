@@ -30,6 +30,8 @@ function inspectSetup({
   add(configExists ? 'ok' : 'error', 'config.json', configExists ? '已找到' : '未找到，请复制 config.example.json');
 
   const enabledFeatures = ['core'];
+  if (config?.access_api_table_id) enabledFeatures.push('api-routing');
+  if (config?.relay_content_table_id) enabledFeatures.push('relay');
   if (config?.ltx_content_table_id || config?.ltx_base_url) enabledFeatures.push('ltx');
   if (config?.platform_account_table_id || config?.platform_publish_table_id) enabledFeatures.push('publishing');
   for (const message of validateConfig(config, { features: enabledFeatures, env })) {
@@ -39,8 +41,9 @@ function inspectSetup({
   for (const name of ['base_token', 'persona_table_id', 'content_table_id', 'persona_image_attachment_field_id']) {
     if (!isPlaceholder(config?.[name]) && !items.some((item) => item.name === name)) add('ok', name, '已配置');
   }
-  for (const name of ['KIMI_API_KEY', 'XYQ_ACCESS_KEY']) {
-    if (!isPlaceholder(env?.[name]) && !items.some((item) => item.name === name)) add('ok', name, '已设置');
+  for (const name of ['KIMI_API_KEY', 'XYQ_ACCESS_KEY', 'NEWAPI_API_KEY']) {
+    add(isPlaceholder(env?.[name]) ? 'warning' : 'ok', name,
+      isPlaceholder(env?.[name]) ? '未设置；使用“接入API”本机密钥时不需要' : '已设置（迁移后可删除）');
   }
 
   add(larkCliAvailable ? 'ok' : 'error', 'lark-cli', larkCliAvailable ? '已安装' : '未找到 @larksuite/cli');

@@ -9,6 +9,8 @@ const ROOT = path.resolve(__dirname, '..');
 const DEFAULT_STATE_PATH = path.join(ROOT, 'runtime', 'media-relay-state.json');
 const DEFAULT_STORAGE_DIR = path.join(ROOT, 'runtime', 'media-relay');
 const IMAGE_EXTENSIONS = new Set(['.avif', '.bmp', '.gif', '.jpeg', '.jpg', '.png', '.webp']);
+const VIDEO_EXTENSIONS = new Set(['.mp4', '.mov', '.m4v', '.webm']);
+const MEDIA_EXTENSIONS = new Set([...IMAGE_EXTENSIONS, ...VIDEO_EXTENSIONS]);
 const MIME_BY_EXTENSION = Object.freeze({
   '.avif': 'image/avif',
   '.bmp': 'image/bmp',
@@ -17,6 +19,10 @@ const MIME_BY_EXTENSION = Object.freeze({
   '.jpg': 'image/jpeg',
   '.png': 'image/png',
   '.webp': 'image/webp',
+  '.m4v': 'video/mp4',
+  '.mov': 'video/quicktime',
+  '.mp4': 'video/mp4',
+  '.webm': 'video/webm',
 });
 
 function safeSegment(value, fallback) {
@@ -29,7 +35,7 @@ function safeSegment(value, fallback) {
 
 function buildRelayAssetKey({ recordId, role, filePath, randomBytes = nodeRandomBytes }) {
   const extension = path.extname(filePath).toLowerCase();
-  if (!IMAGE_EXTENSIONS.has(extension)) throw new Error(`LTX只支持图片附件: ${path.basename(filePath)}`);
+  if (!MEDIA_EXTENSIONS.has(extension)) throw new Error(`中继只支持图片或视频附件: ${path.basename(filePath)}`);
   const token = randomBytes(16).toString('hex');
   return `${safeSegment(recordId, 'record')}-${safeSegment(role, 'frame')}-${token}${extension}`;
 }
@@ -74,7 +80,7 @@ function createMediaRequestHandler({ storageDir = DEFAULT_STORAGE_DIR } = {}) {
     const extension = path.extname(assetKey).toLowerCase();
     const validKey = /^[a-zA-Z0-9_-]+-[a-zA-Z0-9_-]+-[0-9a-f]{32}\.[a-z0-9]+$/.test(assetKey)
       && path.basename(assetKey) === assetKey
-      && IMAGE_EXTENSIONS.has(extension);
+      && MEDIA_EXTENSIONS.has(extension);
     const filePath = validKey ? path.join(storageDir, assetKey) : '';
     if (!filePath || !fs.existsSync(filePath)) {
       response.writeHead(404);
@@ -156,6 +162,8 @@ module.exports = {
   DEFAULT_STATE_PATH,
   DEFAULT_STORAGE_DIR,
   IMAGE_EXTENSIONS,
+  MEDIA_EXTENSIONS,
+  VIDEO_EXTENSIONS,
   buildRelayAssetKey,
   createMediaRequestHandler,
   createRelayMediaStore,
