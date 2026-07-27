@@ -192,14 +192,14 @@ git commit -m "fix: select only final generated artifacts"
 - Preserve: `scripts/run-worker-hidden.vbs`
 
 **Interfaces:**
-- PS-0002 record ID: `recvpfdmGM6JkC`
-- CT-00005 record ID: `recvpqWoaYFxWp`
+- PS-0002 record ID: `<REDACTED_PERSONA_RECORD_ID>`
+- CT-00005 record ID: `<REDACTED_CONTENT_RECORD_ID>`
 
 - [x] **Step 1: Reset the two records for one retry**
 
 ```powershell
-lark-cli base +record-upsert --base-token S5gabIRksaJNRmsmGR3cDUNBnTf --table-id tblZrkzhn0ci5dJT --record-id recvpfdmGM6JkC --json '{"是否立刻生成人设":"是","人设生成状态":"待生成","失败原因":null}' --as user --format json
-lark-cli base +record-upsert --base-token S5gabIRksaJNRmsmGR3cDUNBnTf --table-id tblEjufPDjnVGOQJ --record-id recvpqWoaYFxWp --json '{"是否立刻生成视频":"是","生成状态":"待生成","最终视频":null,"小云雀线程ID":null,"小云雀运行ID":null,"生成任务链接":null,"失败原因":null}' --as user --format json
+lark-cli base +record-upsert --base-token <REDACTED_BASE_TOKEN> --table-id <REDACTED_PERSONA_TABLE_ID> --record-id <REDACTED_PERSONA_RECORD_ID> --json '{"是否立刻生成人设":"是","人设生成状态":"待生成","失败原因":null}' --as user --format json
+lark-cli base +record-upsert --base-token <REDACTED_BASE_TOKEN> --table-id <REDACTED_CONTENT_TABLE_ID> --record-id <REDACTED_CONTENT_RECORD_ID> --json '{"是否立刻生成视频":"是","生成状态":"待生成","最终视频":null,"小云雀线程ID":null,"小云雀运行ID":null,"生成任务链接":null,"失败原因":null}' --as user --format json
 ```
 
 - [x] **Step 2: Enable and start the scheduled worker**
