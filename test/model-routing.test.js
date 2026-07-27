@@ -38,6 +38,17 @@ test('normalizes a Feishu access row without secret material', () => {
   assert.doesNotMatch(JSON.stringify(access), /Bearer|sk-/);
 });
 
+test('normalizes Feishu markdown URLs and video API styles', () => {
+  const access = normalizeAccessRecord(accessRow({
+    API协议: ['Videos'],
+    接口地址: '[http://14.103.100.4:6070/v1](http://14.103.100.4:6070/v1)',
+    视频接口样式: ['NewAPI Video Generations'],
+  }));
+
+  assert.equal(access.baseUrl, 'http://14.103.100.4:6070/v1');
+  assert.equal(access.videoApiStyle, 'newapi-video-generations');
+});
+
 test('explicit linked access wins over defaults and must match capability', () => {
   const explicit = normalizeAccessRecord(accessRow());
   const other = normalizeAccessRecord(accessRow({ record_id: 'rec-api-2', 接入编号: 'API-0002', 接入名称: '其他默认' }));
@@ -114,4 +125,3 @@ test('model snapshot is deterministic and excludes credential aliases', () => {
   });
   assert.doesNotMatch(snapshot, /密钥|credential|rec-api-1/);
 });
-

@@ -6,6 +6,12 @@ const PROTOCOLS = Object.freeze({
   'XYQ Skill': 'xyq-skill',
 });
 
+const VIDEO_API_STYLES = Object.freeze({
+  'OpenAI Videos': 'openai-videos',
+  'NewAPI Video Generations': 'newapi-video-generations',
+  'APIMesh Videos Generations': 'apimesh-videos-generations',
+});
+
 class ModelRoutingError extends Error {
   constructor(code, message) {
     super(message);
@@ -37,17 +43,25 @@ function legacyEnvName(provider, protocol) {
   return '';
 }
 
+function normalizeBaseUrl(value) {
+  const text = String(value || '').trim();
+  const markdown = text.match(/^\[[^\]]*\]\((https?:\/\/[^)]+)\)$/i);
+  return String(markdown?.[1] || text).trim().replace(/\/+$/, '');
+}
+
 function normalizeAccessRecord(row = {}) {
   const provider = optionValues(row['服务商类型'])[0] || '';
   const protocolLabel = optionValues(row['API协议'])[0] || '';
   const protocol = PROTOCOLS[protocolLabel] || String(protocolLabel).trim().toLowerCase();
+  const videoApiStyleLabel = optionValues(row['视频接口样式'] || row.videoApiStyle)[0] || 'OpenAI Videos';
   return {
     recordId: String(row.record_id || row.recordId || '').trim(),
     accessNumber: String(row['接入编号'] || row.accessNumber || '').trim(),
     accessName: String(row['接入名称'] || row.accessName || '').trim(),
     provider,
     protocol,
-    baseUrl: String(row['接口地址'] || row.baseUrl || '').trim().replace(/\/+$/, ''),
+    baseUrl: normalizeBaseUrl(row['接口地址'] || row.baseUrl),
+    videoApiStyle: VIDEO_API_STYLES[videoApiStyleLabel] || videoApiStyleLabel || 'openai-videos',
     modelName: String(row['模型名称'] || row.modelName || '').trim(),
     modelId: String(row['模型ID'] || row.modelId || '').trim(),
     capabilities: optionValues(row['模型能力'] || row.capabilities),
@@ -116,10 +130,10 @@ function snapshotAccess(access) {
 module.exports = {
   ModelRoutingError,
   linkedRecordId,
+  normalizeBaseUrl,
   normalizeAccessRecord,
   optionValues,
   resolveCredential,
   resolveSelectedAccess,
   snapshotAccess,
 };
-
