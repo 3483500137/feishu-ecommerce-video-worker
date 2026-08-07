@@ -43,24 +43,33 @@ function createBotGateway({ runtime, authorize = () => true, sendReply = async (
     if (!messageId) throw new Error('飞书事件缺少message_id');
     if (dedupe.has(messageId)) return { duplicate: true };
     dedupe.add(messageId);
-    if (!(await authorize(actorId))) {
-      await sendReply({ messageId, text: '你没有访问此工作流机器人的权限。' });
-      return { unauthorized: true };
-    }
     const command = parseBotCommand(text);
     try {
       if (command.type === 'status') {
         const run = await runtime.store.getRun(command.runId);
+        if (run && !(await runtime.authorize({ actorId, workflowId: run.workflow_id, action: 'status', run }))) {
+          await sendReply({ messageId, text: '你没有访问此任务的权限。' });
+          return { unauthorized: true };
+        }
         const response = run ? `运行ID：${run.id}\n工作流：${run.workflow_id}\n状态：${run.state}` : '未找到该任务运行记录。';
         await sendReply({ messageId, text: response });
         return { command, run };
       }
       if (command.type === 'approve' || command.type === 'reject') {
+        const current = await runtime.store.getRun(command.runId);
+        if (current && !(await runtime.authorize({ actorId, workflowId: current.workflow_id, action: command.type, run: current }))) {
+          await sendReply({ messageId, text: '你没有审批此任务的权限。' });
+          return { unauthorized: true };
+        }
         const run = await runtime.transition({
           runId: command.runId, event: command.type, actorId, payload: { human_confirmed: true }, idempotencyKey: messageId,
         });
         await sendReply({ messageId, text: `任务已${command.type === 'approve' ? '确认' : '驳回'}，当前状态：${run.state}` });
         return { command, run };
+      }
+      if (!(await runtime.authorize({ actorId, workflowId: command.workflowId, action: 'create' }))) {
+        await sendReply({ messageId, text: '你没有创建此工作流任务的权限。' });
+        return { unauthorized: true };
       }
       const run = await runtime.createRun({
         workflowId: command.workflowId, actorId, source, idempotencyKey: messageId,

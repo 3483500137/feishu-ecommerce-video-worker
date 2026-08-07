@@ -4,6 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { MemoryWorkflowStore, WorkflowRuntime, WorkflowRuntimeError, validateWorkflowDefinition } = require('../src/workflow/runtime');
 const { SkillRegistry } = require('../src/workflow/skills');
+const { createFeishuMemberAuthorizer } = require('../src/workflow/feishu-base');
 
 const definition = {
   id: 'sample', version: '1.0.0', initial_state: 'draft', states: ['draft', 'review', 'done'],
@@ -41,4 +42,19 @@ test('workflow and skill definitions validate their required contracts', async (
   const skills = new SkillRegistry();
   skills.register({ id: 'sample.skill', version: '1.0.0', name: 'Sample', permissions: [] }, async () => ({ status: 'ok' }));
   assert.deepEqual(await skills.execute('sample.skill', {}), { skill_id: 'sample.skill', skill_version: '1.0.0', status: 'ok' });
+});
+
+test('member authorization requires an enabled workflow grant and approval role', async () => {
+  const authorize = createFeishuMemberAuthorizer({
+    tableId: 'tbl-members',
+    listRecords: async () => [{ '飞书OpenID': 'open-1', '是否启用': ['是'], '可访问工作流': ['sample'], '是否可审批': ['否'] }],
+  });
+  assert.equal(await authorize({ actorId: 'open-1', workflowId: 'sample', action: 'create' }), true);
+  assert.equal(await authorize({ actorId: 'open-1', workflowId: 'other', action: 'create' }), false);
+  assert.equal(await authorize({ actorId: 'open-1', workflowId: 'sample', action: 'approve' }), false);
+  const incomplete = createFeishuMemberAuthorizer({
+    tableId: 'tbl-members',
+    listRecords: async () => [{ '飞书OpenID': 'open-2', '是否启用': [], '可访问工作流': [], '是否可审批': ['是'] }],
+  });
+  assert.equal(await incomplete({ actorId: 'open-2', workflowId: 'sample', action: 'create' }), false);
 });

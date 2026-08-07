@@ -56,4 +56,27 @@ function createFeishuWorkflowStore({ baseToken, tables, createRecord, updateReco
   };
 }
 
-module.exports = { STANDARD_WORKFLOW_TABLES, createFeishuWorkflowStore, validateWorkflowBaseConfig };
+function firstOption(value) {
+  if (Array.isArray(value)) return String(typeof value[0] === 'string' ? value[0] : value[0]?.name || '').trim();
+  return String(value || '').trim();
+}
+
+function optionValues(value) {
+  return Array.isArray(value)
+    ? value.map((item) => String(typeof item === 'string' ? item : item?.name || '').trim()).filter(Boolean)
+    : String(value || '').trim().split(/[，,\s]+/).filter(Boolean);
+}
+
+function createFeishuMemberAuthorizer({ tableId, listRecords }) {
+  if (!tableId) throw new Error('缺少成员授权表ID');
+  return async ({ actorId, workflowId, action }) => {
+    const rows = await listRecords(tableId, ['飞书OpenID', '是否启用', '可访问工作流', '是否可审批']);
+    const member = rows.find((row) => String(row['飞书OpenID'] || '').trim() === String(actorId || '').trim());
+    if (!member || firstOption(member['是否启用']) !== '是') return false;
+    const workflows = optionValues(member['可访问工作流']);
+    if (!workflows.includes(workflowId)) return false;
+    return !['approve', 'reject'].includes(action) || firstOption(member['是否可审批']) === '是';
+  };
+}
+
+module.exports = { STANDARD_WORKFLOW_TABLES, createFeishuMemberAuthorizer, createFeishuWorkflowStore, validateWorkflowBaseConfig };

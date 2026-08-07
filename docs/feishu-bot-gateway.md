@@ -11,7 +11,7 @@
 3. 开通机器人接收单聊消息、群内 @ 消息及发送回复所需的最小权限，并发布应用到目标成员。
 4. 将 App ID 填入 `config.json` 的 `feishu_bot_app_id`。
 5. 将 App Secret 以 `feishu_bot_secret_alias` 写入当前 Windows 用户的 DPAPI 凭证库；不要把它写入 Base、`config.json` 或聊天记录。
-6. 在 `feishu_bot_allowed_open_ids` 中配置获准用户；生产环境还应同步维护 Base 的“成员授权”表。
+6. 在 Base 的“成员授权”表维护 `飞书OpenID`、`是否启用`、`可访问工作流` 和 `是否可审批`。机器人每次操作都从该表校验权限；`feishu_bot_allowed_open_ids` 保留为旧配置兼容字段，不作为首版授权来源。
 
 ## 启动
 
@@ -25,6 +25,19 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install-bot-gateway-task.ps1
 ```powershell
 npm run start:bot
 ```
+
+## 工作流 Base 结构
+
+每个客户或业务使用一套独立 Base，并在 `config.json.workflow_base` 填入下列八张表的 ID：`工作流配置`、`技能注册`、`业务任务`、`任务运行`、`任务事件`、`工件`、`人工决策`（配置键为 `member_authorization_table_id`）与 `运行指标`。表名可自定义，配置的表 ID 才是运行时依据。
+
+首版机器人实际读写的字段契约如下；其余表用于配置、审计扩展和后续运营看板：
+
+- `任务运行`：`运行ID`、`工作流ID`、`工作流版本`、`状态`、`输入（内部）`、`来源`、`幂等键`、`创建人ID（内部）`、`创建时间`、`更新时间`。
+- `任务事件`：`事件ID`、`运行ID`、`事件类型`、`操作者ID（内部）`、`发生时间`、`幂等键`、`载荷（内部）`。
+- `成员授权`：`飞书OpenID`、`是否启用`（必须为“是”）、`可访问工作流`（多选，必须显式包含 workflow ID）、`是否可审批`（“是”才可确认或驳回）。
+- `运行指标`：`运行ID`、`事件`、`记录时间`。
+
+`人工决策`表由业务侧用于沉淀审批结论；运行时的确认/驳回事件同时写入`任务事件`，因此可从运行记录完整追溯。
 
 ## 用户命令
 
