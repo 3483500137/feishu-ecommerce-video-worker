@@ -99,6 +99,10 @@ powershell -ExecutionPolicy Bypass -File .\scripts\run-worker.ps1
 powershell -ExecutionPolicy Bypass -File .\scripts\run-multipost-account-server.ps1
 ```
 
+## 飞书机器人工作流入口
+
+通用工作流运行时和飞书机器人入口位于 `src/workflow/` 与 `src/bot-gateway.js`。它们把飞书单聊或群内 @ 消息转换为可审计的工作流任务，而不将本机暴露为公网 Webhook。配置、权限和启动方式见 [飞书机器人工作流入口](docs/feishu-bot-gateway.md)。
+
 计划任务名称：`FeishuEcommerceVideoWorker`，每分钟扫描一次且禁止重叠运行。
 
 MultiPost 本地桥接任务名称：`FeishuMultiPostAccountServer`。首次安装或更新工作流目录中的扩展后，需要在 Chrome 扩展管理页重新加载 `vendor\MultiPost-1.3.8`。

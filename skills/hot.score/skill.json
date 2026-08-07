@@ -1,0 +1,6 @@
+{
+  "id": "hot.score",
+  "version": "1.0.0",
+  "name": "热点评分",
+  "permissions": ["model:chat"]
+}

@@ -1,0 +1,16 @@
+{
+  "id": "ecommerce-content",
+  "version": "1.0.0",
+  "name": "电商内容生成",
+  "requires_discovery": true,
+  "initial_state": "draft",
+  "states": ["draft", "prompting", "generating", "awaiting_review", "approved", "rejected", "failed"],
+  "transitions": [
+    { "event": "prepare_prompt", "from": "draft", "to": "prompting", "skill": "content.prompt" },
+    { "event": "generate_video", "from": "prompting", "to": "generating", "skill": "content.video" },
+    { "event": "submit_review", "from": "generating", "to": "awaiting_review" },
+    { "event": "approve", "from": "awaiting_review", "to": "approved", "requires_human": true },
+    { "event": "reject", "from": "awaiting_review", "to": "rejected", "requires_human": true },
+    { "event": "fail", "from": "draft", "to": "failed" }
+  ]
+}

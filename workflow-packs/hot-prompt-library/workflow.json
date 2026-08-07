@@ -1,0 +1,15 @@
+{
+  "id": "hot-prompt-library",
+  "version": "1.0.0",
+  "name": "热点提示词库",
+  "requires_discovery": true,
+  "initial_state": "queued",
+  "states": ["queued", "collecting", "scoring", "awaiting_selection", "published", "rejected", "failed"],
+  "transitions": [
+    { "event": "collect", "from": "queued", "to": "collecting", "skill": "hot.collect" },
+    { "event": "score", "from": "collecting", "to": "scoring", "skill": "hot.score" },
+    { "event": "submit_selection", "from": "scoring", "to": "awaiting_selection" },
+    { "event": "approve", "from": "awaiting_selection", "to": "published", "requires_human": true },
+    { "event": "reject", "from": "awaiting_selection", "to": "rejected", "requires_human": true }
+  ]
+}
