@@ -39,6 +39,7 @@ const PLATFORM_KEYS = Object.freeze({
 });
 
 const PLATFORM_LOGIN_URLS = Object.freeze({
+  '抖音': 'https://creator.douyin.com/creator-micro/home',
   '快手': 'https://cp.kuaishou.com/article/publish/video',
 });
 
@@ -73,6 +74,21 @@ function platformLoginUrl(platformName) {
 function cleanText(value) {
   if (value === null || value === undefined) return '';
   return String(value).trim();
+}
+
+function buildMinimalAccountInfo(platformKey, accountInfoMap) {
+  const key = String(platformKey || '').trim();
+  const account = accountInfoMap && typeof accountInfoMap === 'object'
+    ? accountInfoMap[key]
+    : null;
+  if (!key || !account || typeof account !== 'object') return {};
+  return {
+    [key]: {
+      provider: String(account.provider || key).trim(),
+      accountId: String(account.accountId || '').trim(),
+      username: String(account.username || '').trim(),
+    },
+  };
 }
 
 function feishuDateTime(date = new Date()) {
@@ -256,6 +272,7 @@ function accountPage({ recordId, platformName }) {
   </main>
   <script>
     const input = ${safeData};
+    const buildMinimalAccountInfo = ${buildMinimalAccountInfo.toString()};
     const statusNode = document.getElementById('status');
     const resultNode = document.getElementById('result');
     const loginActionsNode = document.getElementById('login-actions');
@@ -313,16 +330,21 @@ function accountPage({ recordId, platformName }) {
     }
 
     async function readAccountInfo({ refresh = false } = {}) {
-      if (input.platformKey === 'kuaishou' && refresh) {
+      const refreshActions = {
+        kuaishou: 'MULTIPOST_EXTENSION_REFRESH_KUAISHOU_ACCOUNT_INFO',
+        douyin: 'MULTIPOST_EXTENSION_REFRESH_DOUYIN_ACCOUNT_INFO'
+      };
+      const refreshAction = refreshActions[input.platformKey];
+      if (refreshAction && refresh) {
         let extensionResult;
         try {
           extensionResult = await requestExtension(
-            'MULTIPOST_EXTENSION_REFRESH_KUAISHOU_ACCOUNT_INFO',
+            refreshAction,
             {},
             10000
           );
         } catch {
-          throw new Error('当前 MultiPost 扩展未加载快手账号桥接，请在扩展管理页重新加载工作流目录中的 MultiPost 扩展');
+          throw new Error('当前 MultiPost 扩展未加载账号实时校验桥接，请在扩展管理页重新加载工作流目录中的 MultiPost 扩展');
         }
         if (extensionResult.error) throw new Error(extensionResult.error);
         return extensionResult.accountInfo || {};
@@ -338,7 +360,7 @@ function accountPage({ recordId, platformName }) {
         body: JSON.stringify({
           recordId: input.recordId,
           platformName: input.platformName,
-          accountInfo
+          accountInfo: buildMinimalAccountInfo(input.platformKey, accountInfo)
         })
       });
       const payload = await response.json();
@@ -360,7 +382,7 @@ function accountPage({ recordId, platformName }) {
         const trust = await requestExtension('MULTIPOST_EXTENSION_REQUEST_TRUST_DOMAIN');
         if (trust.trusted === false) throw new Error('你没有允许 127.0.0.1 访问 MultiPost 扩展');
         setStatus('正在读取当前浏览器的 MultiPost 账号……');
-        const accountInfo = await readAccountInfo({ refresh: input.platformKey === 'kuaishou' });
+        const accountInfo = await readAccountInfo({ refresh: ['kuaishou', 'douyin'].includes(input.platformKey) });
         const patch = await persistAccount(accountInfo);
         if (patch['登录状态'] === '有效') {
           loginActionsNode.hidden = true;
@@ -387,7 +409,7 @@ function accountPage({ recordId, platformName }) {
       try {
         for (let attempt = 0; attempt < 20; attempt += 1) {
           if (attempt > 0) await delay(3000);
-          const accountInfo = await readAccountInfo({ refresh: input.platformKey === 'kuaishou' });
+          const accountInfo = await readAccountInfo({ refresh: ['kuaishou', 'douyin'].includes(input.platformKey) });
           if (!selectedAccount(accountInfo)) continue;
           const patch = await persistAccount(accountInfo);
           if (patch['登录状态'] === '有效') {
@@ -528,8 +550,13 @@ function publishPage(taskId) {
         const claim = await post('/api/multipost/publish-task/claim', { taskId });
         claimed = true;
         const task = claim.task;
-        const accountResult = task.expectedAccount?.platformKey === 'kuaishou'
-          ? await requestExtension('MULTIPOST_EXTENSION_REFRESH_KUAISHOU_ACCOUNT_INFO', {}, 10000)
+        const accountRefreshActions = {
+          kuaishou: 'MULTIPOST_EXTENSION_REFRESH_KUAISHOU_ACCOUNT_INFO',
+          douyin: 'MULTIPOST_EXTENSION_REFRESH_DOUYIN_ACCOUNT_INFO'
+        };
+        const accountRefreshAction = accountRefreshActions[task.expectedAccount?.platformKey];
+        const accountResult = accountRefreshAction
+          ? await requestExtension(accountRefreshAction, {}, 10000)
           : await requestExtension('MULTIPOST_EXTENSION_GET_ACCOUNT_INFOS');
         if (accountResult.error) throw new Error(accountResult.error);
         if (!accountMatches(task.expectedAccount, accountResult.accountInfo || {})) {
@@ -748,6 +775,7 @@ module.exports = {
   PLATFORM_KEYS,
   accountPage,
   buildAccountPatch,
+  buildMinimalAccountInfo,
   createAccessBaseClient,
   createAccountServer,
   createDefaultApiConfigHandler,

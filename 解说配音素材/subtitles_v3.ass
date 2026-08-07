@@ -1,0 +1,29 @@
+﻿[Script Info]
+ScriptType: v4.00+
+PlayResX: 1920
+PlayResY: 1080
+WrapStyle: 0
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default, Microsoft YaHei, 47, &H00FFFFFF, &H00FFFFFF, &HFF000000, &H90404040, 0, 0, 0, 0, 100, 100, 0, 0, 4, 14, 0, 2, 120, 120, 56, 1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:00.00,0:00:11.30,Default,,0,0,0,,先看模型接入表。这里不是把密钥写进配置文件，而是把每一个文本、\N图片、视频模型，单独作为一条接入记录来管理。
+Dialogue: 0,0:00:11.44,0:00:24.98,Default,,0,0,0,,点开配置接入之后，API 密钥会保存到本机的 Windows 加密凭据里。\N飞书里只留下模型能力、接口地址和可选项，方便团队一起选模型。
+Dialogue: 0,0:00:25.12,0:00:38.50,Default,,0,0,0,,接下来是内容表。运营把参考视频、人设、视频模型和发布账号填好，\N剩下的下载素材、上传资产、提交任务、回填状态，
+Dialogue: 0,0:00:38.64,0:00:50.34,Default,,0,0,0,,在人设管理里，可以先生成真人风格的人物形象。参考图只用来锁定人物身份，\N服装、场景和风格仍然跟着人设要求走。
+Dialogue: 0,0:00:50.48,0:01:01.86,Default,,0,0,0,,如果走小云雀和 Seedance，就是参考视频换人；\N如果走中转站，可以做文生视频、图生视频、首尾帧和参考视频生成。
+Dialogue: 0,0:01:02.00,0:01:14.98,Default,,0,0,0,,任务执行时，飞书会持续回填线程 ID、运行 ID、\N任务链接、最终视频和失败原因。中途断开，也会根据已有任务继续轮询，
+Dialogue: 0,0:01:15.12,0:01:30.26,Default,,0,0,0,,生成完成后，系统继续生成标题、文案和标签。确认发布之前，\N还会校验 MultiPost 账号、Chrome 登录状态和幂等键，
+Dialogue: 0,0:01:30.40,0:01:41.86,Default,,0,0,0,,确认发布后，本地桥接服务会调用 MultiPost 扩展真实发布。\N平台显示已发布之后，发布时间和发布结果会自动回填。
+Dialogue: 0,0:01:42.00,0:01:44.74,Default,,0,0,0,,现在切到一个真实案例。
+Dialogue: 0,0:01:45.00,0:01:49.10,Default,,0,0,0,,左边这个，是当前飞书里正在复刻的目标博主。
+Dialogue: 0,0:02:00.50,0:02:09.00,Default,,0,0,0,,这里播放的是她的原始视频，动作、镜头和背景音乐，\N都会作为复刻时的参考。
+Dialogue: 0,0:02:12.50,0:02:22.36,Default,,0,0,0,,接下来切到第一个复刻账号。可以看到，内容已经换成新的账号身份，\N但保留了相近的动作节奏和画面氛围。
+Dialogue: 0,0:02:32.00,0:02:40.74,Default,,0,0,0,,这里是第二个复刻账号。不同账号可以绑定不同人设和发布任务，\N最终都能回到同一张飞书表里管理。
+Dialogue: 0,0:02:41.00,0:02:49.66,Default,,0,0,0,,案例里的原视频和成果视频，我保留了背景音，这样\N能直接感受到复刻前后的内容氛围。
+Dialogue: 0,0:02:50.00,0:03:00.50,Default,,0,0,0,,最后回到发布看板。每条内容的标题、文案、标签、\N最终视频链接和发布状态，都能在这里继续追踪。
+Dialogue: 0,0:03:00.64,0:03:13.06,Default,,0,0,0,,这套工具真正解决的，不只是生成视频，而是把模型、\N素材、账号、发布和异常处理，收束成一条可追踪、

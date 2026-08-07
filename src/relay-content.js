@@ -1,6 +1,7 @@
 'use strict';
 
 const { ModelRoutingError, optionValues } = require('./model-routing');
+const { promptTargetDirection, targetDirectionInstruction } = require('./douyin-hot');
 
 function option(value, fallback = '') {
   return optionValues(value)[0] || fallback;
@@ -76,7 +77,9 @@ function shouldGeneratePrompt(row = {}) {
 
 function hasPromptSource(row = {}) {
   const method = relayGenerationMethod(row);
+  if (text(row['提示词库错误'])) return true;
   if (text(row['输入内容要求'])) return true;
+  if (text(row['提示词库内容'])) return true;
   if (method === '参考视频生成') {
     return Boolean(extractUrl(row['参考视频链接']) || attachmentUrl(row['参考视频']));
   }
@@ -120,17 +123,25 @@ function relayContentJobAction(row = {}) {
 
 function buildRelayPromptRequest(row = {}, access, { referenceVideoDataUrl = '', referenceVideoUrl = '' } = {}) {
   requireProtocol(access, 'chat-completions', '文本');
+  if (text(row['提示词库错误'])) {
+    throw new ModelRoutingError('CONFIG_REQUIRED', text(row['提示词库错误']));
+  }
   const method = relayGenerationMethod(row);
   const rawRequirements = text(row['输入内容要求']);
-  const requirements = rawRequirements || (method === '参考视频生成'
+  const librarySuggestion = text(row['提示词库内容']);
+  const requirements = rawRequirements || librarySuggestion || (method === '参考视频生成'
     ? '按参考视频逐镜复刻；如已选择人设，则用所选人设完整替换参考视频人物。'
     : '');
   if (!requirements) throw new ModelRoutingError('CONFIG_REQUIRED', '请填写输入内容要求');
   const duration = Number(row['视频时长'] || 5);
   const ratio = option(row['画面比例'], '9:16');
   const persona = text(row['人设']);
+  const targetDirection = promptTargetDirection(row);
   const content = [
     `内容要求：${requirements}`,
+    librarySuggestion ? `提示词库建议：${librarySuggestion}` : '',
+    targetDirection ? `本次唯一目标方向：${targetDirection}` : '',
+    targetDirectionInstruction(targetDirection),
     persona ? `人物设定：${persona}` : '',
     `生成方式：${method}`,
     `视频时长：${duration}秒`,
@@ -180,12 +191,17 @@ function buildRelayPromptRequest(row = {}, access, { referenceVideoDataUrl = '',
 }
 
 function buildRelayReferenceLinkPrompt(row = {}, { referenceVideoUrl = '' } = {}) {
+  if (text(row['提示词库错误'])) {
+    throw new ModelRoutingError('CONFIG_REQUIRED', text(row['提示词库错误']));
+  }
   const url = referenceVideoUrl || extractUrl(row['参考视频链接']) || attachmentUrl(row['参考视频']);
   if (!url) throw new ModelRoutingError('CONFIG_REQUIRED', '参考视频生成需要参考视频链接');
   const requirements = text(row['输入内容要求'])
     || '按参考视频逐镜复刻；如已选择人设，则用所选人设完整替换参考视频人物。';
+  const librarySuggestion = text(row['提示词库内容']);
   const persona = text(row['人设']);
   const duration = positiveNumber(row['视频时长']);
+  const targetDirection = promptTargetDirection(row);
   return [
     `参考视频链接：${url}`,
     '使用已上传的所选人设形象和参考视频生成最终视频。',
@@ -201,6 +217,9 @@ function buildRelayReferenceLinkPrompt(row = {}, { referenceVideoUrl = '' } = {}
     '完整复刻参考视频的动作、动作顺序与时间点、对白、台词、旁白、原声、BGM、音效、镜头、运镜、构图、场景调度和剪辑节奏，保持音画同步。',
     '必须按参考视频从 0 秒到结尾的真实时间线连续生成；第二段必须承接第一段之后的参考视频内容，不得把第一段动作、镜头或画面复制到第二段，不得循环、回放或重新开始。',
     `补充要求：${requirements}`,
+    librarySuggestion ? `提示词库建议：${librarySuggestion}` : '',
+    targetDirection ? `本次唯一目标方向：${targetDirection}` : '',
+    targetDirectionInstruction(targetDirection),
     '参考视频优先级最高；补充提示词不得覆盖参考视频内容。无需展示方案，直接生成最终视频。',
   ].filter(Boolean).join('\n');
 }

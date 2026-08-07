@@ -34,6 +34,23 @@ const {
   prepareAnalysisVideo,
 } = require('./ltx-rebuild');
 const { createCredentialStore } = require('./credential-store');
+const {
+  activeHotDirectionConfig,
+  buildHotTopicPromptRequest,
+  buildSmartFillRequest,
+  buildPromptLibrarySyncPlan,
+  buildWeeklyCleanupPlan,
+  currentWeekId,
+  fetchDouyinHotList,
+  parseHotTopicPromptAnalysis,
+  parseSmartFillCandidates,
+  promptLibraryContent,
+  promptTargetDirection,
+  selectDirectionalTopics,
+  selectSmartFillCandidates,
+  selectSmartFillFallback,
+  targetDirectionInstruction,
+} = require('./douyin-hot');
 const { ModelRoutingError } = require('./model-routing');
 const { createWorkerModelRuntime, importLegacyCredentials } = require('./worker-routing');
 const {
@@ -60,6 +77,7 @@ function createWorkerRelayMediaStore() {
 }
 const LTX_REFERENCE_CACHE_DIR = path.join(RUNTIME, 'ltx-reference-cache');
 const RELAY_REFERENCE_CACHE_DIR = path.join(RUNTIME, 'relay-reference-cache');
+const PROMPT_LIBRARY_SYNC_STATE_FILE = path.join(RUNTIME, 'douyin-hot-sync.json');
 const RELAY_R2V_SEGMENT_SECONDS = 15;
 const RELAY_SEGMENT_CONTINUITY_SECONDS = 0.5;
 const LARK_CLI = path.join(process.env.APPDATA, 'npm', 'node_modules', '@larksuite', 'cli', 'scripts', 'run.js');
@@ -183,6 +201,82 @@ function linkedRecordId(value) {
   return Array.isArray(value) ? value[0]?.id || '' : '';
 }
 
+function hydratePromptLibrarySelection(row = {}, promptLibraryById = new Map()) {
+  const recordId = linkedRecordId(row['提示词库']);
+  if (!recordId) return row;
+  const libraryRow = promptLibraryById.get(recordId);
+  if (!libraryRow) {
+    return { ...row, '提示词库错误': '未找到所选择的提示词库记录' };
+  }
+  if (firstOption(libraryRow['是否启用']) === '否') {
+    return { ...row, '提示词库错误': '所选择的提示词库记录已停用' };
+  }
+  const content = promptLibraryContent(libraryRow);
+  if (!content) {
+    return { ...row, '提示词库错误': '所选择的提示词库记录没有热点标题或建议提示词' };
+  }
+  return {
+    ...row,
+    '提示词库内容': content,
+    '提示词库热点标题': String(libraryRow['热点标题'] || libraryRow['文本'] || '').trim(),
+    '提示词库推荐方向': firstOption(libraryRow['系统推荐方向']),
+    '提示词库成交适配分': Number(libraryRow['成交适配分']) || 0,
+    '提示词库涨粉适配分': Number(libraryRow['涨粉适配分']) || 0,
+    '提示词库复刻适配分': Number(libraryRow['复刻适配分']) || 0,
+  };
+}
+
+function buildPromptLibraryVideoRequest(row = {}) {
+  const libraryError = String(row['提示词库错误'] || '').trim();
+  if (libraryError) throw new ModelRoutingError('CONFIG_REQUIRED', libraryError);
+  const librarySuggestion = String(row['提示词库内容'] || '').trim();
+  if (!librarySuggestion) {
+    throw new ModelRoutingError('CONFIG_REQUIRED', '请先选择一条可用的提示词库记录');
+  }
+  const persona = String(row['人设正文'] || '').trim();
+  const referenceAvailable = Boolean(row['参考视频文件'] || extractMarkdownUrl(row['参考视频链接']));
+  const targetDirection = promptTargetDirection(row);
+  const directionInstruction = targetDirectionInstruction(targetDirection);
+  return {
+    messages: [
+      {
+        role: 'system',
+        content: '你是短视频视频生成提示词编辑。只输出一段可直接交给视频生成模型的中文提示词，不要标题、解释、Markdown或标签。',
+      },
+      {
+        role: 'user',
+        content: [
+          `提示词库建议：${librarySuggestion}`,
+          targetDirection ? `本次唯一目标方向：${targetDirection}` : '',
+          directionInstruction,
+          persona ? `所选人物设定：${persona}` : '',
+          referenceAvailable ? '本任务含参考视频；热点建议只能补充内容角度，不得覆盖参考视频中的镜头、动作、时长和时间顺序。' : '',
+          '请把建议扩写为明确、可执行的视频提示词，包含主体、场景、动作、镜头、节奏、光线、9:16 竖屏构图和建议时长。',
+          '涉及新闻、人物、赛事、政策、健康或消费信息时不得虚构事实、结论、价格、功效或当事人言论。',
+        ].filter(Boolean).join('\n'),
+      },
+    ],
+    temperature: 0.3,
+  };
+}
+
+function shouldGeneratePromptFromLibrary(row = {}) {
+  const choice = firstOption(row['生成视频提示词']);
+  const hasPrompt = Boolean(String(row['视频提示词'] || '').trim());
+  return choice === '重新生成' || (choice === '是' && !hasPrompt);
+}
+
+function platformContentSource(row = {}) {
+  const xyqContentId = linkedRecordId(row['小云雀内容']) || linkedRecordId(row['内容']);
+  const relayContentId = linkedRecordId(row['中转站内容']);
+  if (xyqContentId && relayContentId) {
+    return { error: '“小云雀内容”和“中转站内容”只能选择其中一个，不能同时选择。' };
+  }
+  if (xyqContentId) return { kind: 'xyq', recordId: xyqContentId };
+  if (relayContentId) return { kind: 'relay', recordId: relayContentId };
+  return { error: '请从“小云雀内容”或“中转站内容”中选择一条内容。' };
+}
+
 function hydrateRelayPersona(row = {}, personaById = new Map()) {
   const personaId = linkedRecordId(row['人设']);
   const personaText = personaId ? String(personaById.get(personaId)?.['人设'] || '').trim() : '';
@@ -241,9 +335,10 @@ function platformPublishJobAction(row) {
       && (!publishStatus || publishStatus === '待确认' || publishStatus === '发布失败')
       && !hasExistingTask ? 'publish' : 'none';
   }
-  const hasInputs = linkedRecordId(row['内容'])
+  const source = platformContentSource(row);
+  const hasInputs = !source.error
     && linkedRecordId(row['平台账号'])
-    && extractMarkdownUrl(row['最终视频']);
+    && (extractMarkdownUrl(row['最终视频']) || source.kind === 'relay');
   return hasInputs ? 'generate' : 'none';
 }
 
@@ -377,11 +472,105 @@ function chooseArtifactUrl(runData, kind) {
   return '';
 }
 
-function inspectXyqRun(runData, kind) {
+function parseXyqData(value) {
+  if (value && typeof value === 'object') return value;
+  if (typeof value !== 'string' || !value.trim()) return {};
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function inspectXyqVideoContract(runData, {
+  expectedModelId = '',
+  requireReferenceVideo = false,
+} = {}) {
+  const entries = Array.isArray(runData?.entry_list) ? runData.entry_list : [];
+  const contents = entries.flatMap((entry) => [
+    ...(Array.isArray(entry?.message?.content) ? entry.message.content : []),
+    ...(Array.isArray(entry?.artifact?.content) ? entry.artifact.content : []),
+  ]);
+  const complianceErrors = contents
+    .filter((item) => item?.sub_type === 'biz/part_error')
+    .map((item) => parseXyqData(item.data))
+    .filter((item) => Number(item.code) === 12009);
+  const actualModels = contents
+    .filter((item) => item?.sub_type === 'biz/general_agent_settings')
+    .map((item) => String(parseXyqData(item.data).video_model || '').trim())
+    .filter(Boolean);
+  const generationCalls = contents
+    .filter((item) => item?.sub_type === 'tool_call_req')
+    .map((item) => parseXyqData(item.data))
+    .filter((item) => item.tool_name === 'sandbox_generate_video')
+    .map((item) => ({
+      ...item,
+      request: parseXyqData(item.request_data),
+    }));
+  const issues = [];
+
+  if (complianceErrors.length) {
+    issues.push('参考视频生成被平台安全合规审核拦截（12009），禁止删除参考视频后降级重生');
+  }
+
+  if (expectedModelId) {
+    if (!actualModels.length) {
+      issues.push(`小云雀运行记录缺少实际视频模型，无法验证所选模型 ${expectedModelId}`);
+    } else if (actualModels.some((modelId) => modelId.toLowerCase() !== String(expectedModelId).toLowerCase())) {
+      issues.push(`实际视频模型 ${[...new Set(actualModels)].join('、')} 与所选模型 ${expectedModelId} 不一致`);
+    }
+  }
+
+  if (requireReferenceVideo) {
+    if (!generationCalls.length) {
+      issues.push('未找到可验证的参考视频生成调用');
+    }
+    const missingReferenceCalls = generationCalls.filter((call) => !Array.isArray(call.request.VideoList)
+      || !call.request.VideoList.filter(Boolean).length);
+    if (missingReferenceCalls.length) {
+      issues.push(`检测到 ${missingReferenceCalls.length} 次生成调用未传 VideoList，已拒绝无参考视频降级结果`);
+    }
+    const sceneOverrideCalls = generationCalls.filter((call) => {
+      const prompt = String(call.request.Prompt || '');
+      return /(?:不继承|不保留|无需继承).{0,16}(?:场景|色调|光线)|(?:场景|色调|光线).{0,16}(?:不继承|不保留|无需继承)/.test(prompt);
+    });
+    if (sceneOverrideCalls.length) {
+      issues.push('生成提示词要求不继承参考视频场景/色调/光线，与逐镜复刻约束冲突');
+    }
+    const continuationCalls = generationCalls.filter((call) => /(?:shot|seg|part)[_-]?0?2/i.test(String(call.request.OutputPath || '')));
+    const missingTailFrame = continuationCalls.filter((call) => !Array.isArray(call.request.ImageList)
+      || !call.request.ImageList.some((item) => /(?:last|tail|尾帧)/i.test(String(item))));
+    if (missingTailFrame.length) {
+      issues.push(`检测到 ${missingTailFrame.length} 个后续分段未传上一段尾帧，无法保证人物与动作连续`);
+    }
+  }
+
+  return { issues, actualModels, generationCalls };
+}
+
+function inspectXyqRun(runData, kind, validation = {}) {
   const state = Number(runData?.state);
   if (state === 3) {
+    if (kind === 'video') {
+      const contract = inspectXyqVideoContract(runData, validation);
+      if (contract.issues.length) {
+        return { status: 'failed', error: `小云雀结果未通过复刻验收：${contract.issues.join('；')}` };
+      }
+    }
     const resultUrl = chooseArtifactUrl(runData, kind);
     if (resultUrl) return { status: 'completed', resultUrl };
+    const partErrors = (Array.isArray(runData?.entry_list) ? runData.entry_list : [])
+      .flatMap((entry) => Array.isArray(entry?.artifact?.content) ? entry.artifact.content : [])
+      .filter((item) => item?.sub_type === 'biz/part_error')
+      .map((item) => parseXyqData(item.data));
+    if (partErrors.length) {
+      const last = partErrors.at(-1);
+      return {
+        status: 'failed',
+        error: `小云雀生成失败（${last.code || '未知错误码'}）：${last.message || '平台未提供具体原因'}`,
+      };
+    }
     return { status: 'failed', error: `小云雀任务完成但未找到${kind === 'video' ? '视频' : '图片'}结果` };
   }
   if (state === 4) return { status: 'failed', error: `小云雀生成失败: ${runData?.fail_reason || '未知原因'}` };
@@ -402,6 +591,25 @@ function listRecords(tableId, fields) {
   const args = ['base', '+record-list', '--base-token', CONFIG.base_token, '--table-id', tableId, '--limit', '200'];
   fieldIds.forEach((fieldId) => args.push('--field-id', fieldId));
   return rowsFromEnvelope(runLark(args));
+}
+
+function listAllRecords(tableId, fields, pageSize = 200) {
+  const definitions = runLark([
+    'base', '+field-list', '--base-token', CONFIG.base_token, '--table-id', tableId,
+  ]).fields || [];
+  const fieldIds = resolveFieldIds(fields, definitions);
+  const rows = [];
+  for (let offset = 0; ; offset += pageSize) {
+    const args = [
+      'base', '+record-list', '--base-token', CONFIG.base_token, '--table-id', tableId,
+      '--limit', String(pageSize), '--offset', String(offset),
+    ];
+    fieldIds.forEach((fieldId) => args.push('--field-id', fieldId));
+    const batch = rowsFromEnvelope(runLark(args));
+    rows.push(...batch);
+    if (batch.length < pageSize) break;
+  }
+  return rows;
 }
 
 function legacyAccessRowsFromConfig() {
@@ -451,6 +659,263 @@ function updateRecord(tableId, recordId, patch) {
   ]);
 }
 
+function createRecord(tableId, patch) {
+  return runLark([
+    'base', '+record-upsert', '--base-token', CONFIG.base_token,
+    '--table-id', tableId, '--json', JSON.stringify(patch),
+  ]);
+}
+
+function deleteRecords(tableId, recordIds = []) {
+  for (let offset = 0; offset < recordIds.length; offset += 200) {
+    const batch = recordIds.slice(offset, offset + 200);
+    if (!batch.length) continue;
+    const args = [
+      'base', '+record-delete', '--base-token', CONFIG.base_token,
+      '--table-id', tableId, '--yes',
+    ];
+    batch.forEach((recordId) => args.push('--record-id', recordId));
+    runLark(args);
+  }
+}
+
+function shanghaiDayAndMinute(value) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (!Number.isFinite(date.getTime())) return { day: '', minute: -1 };
+  const shifted = new Date(date.getTime() + 8 * 60 * 60_000);
+  return {
+    day: shifted.toISOString().slice(0, 10),
+    minute: shifted.getUTCHours() * 60 + shifted.getUTCMinutes(),
+  };
+}
+
+function promptLibrarySyncDue(lastSyncedAt, {
+  now = new Date(),
+  dailySyncTime = String(CONFIG.douyin_hot_daily_sync_time || '08:00'),
+} = {}) {
+  const last = new Date(String(lastSyncedAt || ''));
+  if (!Number.isFinite(last.getTime())) return true;
+  const nowLocal = shanghaiDayAndMinute(now);
+  const lastLocal = shanghaiDayAndMinute(last);
+  if (nowLocal.day === lastLocal.day) return false;
+  const match = /^(\d{1,2}):(\d{2})$/.exec(dailySyncTime.trim());
+  const scheduledMinute = match
+    ? Math.min(23, Number(match[1])) * 60 + Math.min(59, Number(match[2]))
+    : 8 * 60;
+  return nowLocal.minute >= scheduledMinute;
+}
+
+function readPromptLibrarySyncState() {
+  try {
+    return JSON.parse(fs.readFileSync(PROMPT_LIBRARY_SYNC_STATE_FILE, 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
+function writePromptLibrarySyncState(state) {
+  ensureDirs();
+  fs.writeFileSync(PROMPT_LIBRARY_SYNC_STATE_FILE, `${JSON.stringify(state, null, 2)}\n`, 'utf8');
+}
+
+async function syncDouyinPromptLibrary({
+  now = new Date(),
+  force = false,
+  fetchTopics = fetchDouyinHotList,
+  list = listAllRecords,
+  create = createRecord,
+  update = updateRecord,
+  remove = deleteRecords,
+  readState = readPromptLibrarySyncState,
+  writeState = writePromptLibrarySyncState,
+  runtime = ACTIVE_MODEL_RUNTIME,
+} = {}) {
+  const tableId = CONFIG.prompt_library_table_id;
+  if (!tableId) return { skipped: true, reason: 'not-configured' };
+  const state = readState() || {};
+  const directionRows = CONFIG.hot_direction_table_id
+    ? list(CONFIG.hot_direction_table_id, [
+      '配置名称', '目标方向', '热点题材', '包含关键词', '排除关键词',
+      '每日热点数量', '最低方向匹配分', '补足策略', '智能补足最低分',
+      '立即刷新热点', '是否启用',
+    ])
+    : [];
+  const directionConfig = activeHotDirectionConfig(directionRows);
+  const refreshRequested = directionConfig.refreshRequested;
+  if (!force && !refreshRequested && !promptLibrarySyncDue(state.lastSyncedAt, { now })) {
+    return { skipped: true, reason: 'daily-schedule' };
+  }
+  const upstreamLimit = Math.max(
+    directionConfig.dailyLimit,
+    Math.min(50, Number(CONFIG.douyin_hot_candidate_limit || CONFIG.douyin_hot_limit || 50)),
+  );
+  const upstreamTopics = await fetchTopics({ limit: upstreamLimit });
+  const strictTopics = selectDirectionalTopics(upstreamTopics, directionConfig, { now });
+  let directionalTopics = strictTopics;
+  let forceLocalPromptAnalysis = false;
+  const smartCandidates = selectSmartFillCandidates(upstreamTopics, strictTopics, directionConfig, { now });
+  if (smartCandidates.length) {
+    const requestedCount = Math.max(0, directionConfig.dailyLimit - strictTopics.length);
+    const useSmartFallback = (error = null) => {
+      const fallbackTopics = selectSmartFillFallback(smartCandidates, directionConfig, {
+        now,
+        limit: requestedCount,
+      });
+      directionalTopics = [...strictTopics, ...fallbackTopics]
+        .sort((left, right) => right.priorityScore - left.priorityScore || left.rank - right.rank)
+        .slice(0, directionConfig.dailyLimit);
+      forceLocalPromptAnalysis = true;
+      log(error ? '抖音热点智能补足模型调用失败，已使用安全规则兜底' : '抖音热点立即刷新使用安全规则智能补足', {
+        ...(error ? { error: error.message } : {}),
+        supplemented: fallbackTopics.length,
+      });
+    };
+    if (refreshRequested) {
+      useSmartFallback();
+    } else try {
+      const request = buildSmartFillRequest(smartCandidates, directionConfig, { limit: requestedCount });
+      const generated = await runtime.completeChat({
+        row: {},
+        fieldName: '',
+        capability: '文本',
+        defaultPurpose: '提示词',
+        messages: request.messages,
+        temperature: request.temperature,
+      });
+      const smartTopics = parseSmartFillCandidates(generated.content, smartCandidates, directionConfig, {
+        now,
+        limit: requestedCount,
+      });
+      directionalTopics = [...strictTopics, ...smartTopics]
+        .sort((left, right) => right.priorityScore - left.priorityScore || left.rank - right.rank)
+        .slice(0, directionConfig.dailyLimit);
+      log('抖音热点智能补足完成', {
+        strict: strictTopics.length,
+        candidates: smartCandidates.length,
+        supplemented: smartTopics.length,
+        model: generated.access?.modelId || generated.access?.modelName || '',
+      });
+    } catch (error) {
+      useSmartFallback(error);
+    }
+  }
+  const periodId = currentWeekId(now);
+  const topics = [];
+  for (const topic of directionalTopics) {
+    let analysis;
+    let promptModel = '';
+    if (forceLocalPromptAnalysis) {
+      analysis = parseHotTopicPromptAnalysis('', topic, directionConfig);
+    } else try {
+      const complete = async (candidate) => {
+        const request = buildHotTopicPromptRequest(candidate, directionConfig);
+        return runtime.completeChat({
+          row: {},
+          fieldName: '',
+          capability: '文本',
+          defaultPurpose: '提示词',
+          messages: request.messages,
+          temperature: request.temperature,
+        });
+      };
+      let generated;
+      let analysisTopic = topic;
+      if (topic.coverUrl) {
+        try {
+          analysisTopic = { ...topic, coverUrl: await imageUrlDataUrl(topic.coverUrl) };
+        } catch (error) {
+          log('热点封面无法转为模型输入，继续使用原始封面链接', {
+            topicId: topic.topicId,
+            error: error.message,
+          });
+        }
+      }
+      try {
+        generated = await complete(analysisTopic);
+      } catch (error) {
+        if (!analysisTopic.coverUrl) throw error;
+        log('热点封面不受分析模型支持，改用标题和热榜元数据重试', {
+          topicId: topic.topicId,
+          error: error.message,
+        });
+        generated = await complete({ ...topic, coverUrl: '' });
+      }
+      analysis = parseHotTopicPromptAnalysis(generated.content, topic, directionConfig);
+      promptModel = generated.access?.modelId || generated.access?.modelName || '';
+    } catch (error) {
+      analysis = parseHotTopicPromptAnalysis('', topic, directionConfig);
+      log('热点视频分析模型调用失败，已使用可审计的本地提示词', {
+        topicId: topic.topicId,
+        error: error.message,
+      });
+    }
+    topics.push({
+      ...topic,
+      ...analysis,
+      suggestion: analysis.prompt,
+      promptModel,
+      periodId,
+      directionConfigRecordId: directionConfig.recordId,
+      capturedAt: upstreamTopics[0]?.capturedAt || feishuDateTime(now),
+      recommendedDirection: directionConfig.targetDirection,
+      recommendationReason: [
+        `当前唯一目标方向：${directionConfig.targetDirection}`,
+        `热点题材：${directionConfig.topicDirection}`,
+        `入库方式：${topic.matchMethod || '严格匹配'}${topic.smartFillReason ? `（${topic.smartFillReason}）` : ''}`,
+        `方向匹配${topic.directionMatchScore}／热度${topic.heatScore}／可复刻${topic.reproducibilityScore}／新鲜度${topic.freshnessScore}`,
+        `综合优先分${topic.priorityScore}`,
+      ].join('；'),
+    });
+  }
+  const existingRows = list(tableId, [
+    '热点标题', '来源平台', '热榜ID', '热点视频ID', '热榜排名', '热度值',
+    '建议提示词', '成交适配分', '涨粉适配分', '复刻适配分',
+    '系统推荐方向', '推荐理由', '抓取时间', '所属周期', '是否启用',
+  ]);
+  const deletionIds = buildWeeklyCleanupPlan(existingRows, {
+    now,
+    currentPeriod: periodId,
+    config: directionConfig,
+    retainTopicIds: topics.map((topic) => topic.topicId),
+  });
+  remove(tableId, deletionIds);
+  const deleted = new Set(deletionIds);
+  const retainedRows = existingRows.filter((row) => !deleted.has(row.record_id));
+  const syncedAt = feishuDateTime(now);
+  const plan = buildPromptLibrarySyncPlan(retainedRows, topics, { syncedAt });
+  for (const item of plan.updates) update(tableId, item.recordId, item.patch);
+  for (const patch of plan.creates) create(tableId, patch);
+  if (refreshRequested && directionConfig.recordId && CONFIG.hot_direction_table_id) {
+    update(CONFIG.hot_direction_table_id, directionConfig.recordId, { '立即刷新热点': '否' });
+  }
+  writeState({
+    lastSyncedAt: now.toISOString(),
+    lastCleanedWeek: periodId,
+    upstreamCapturedAt: upstreamTopics[0]?.capturedAt || '',
+    candidateCount: upstreamTopics.length,
+    count: topics.length,
+    strictCount: strictTopics.length,
+    smartFilledCount: Math.max(0, topics.length - strictTopics.length),
+    directionConfig: {
+      targetDirection: directionConfig.targetDirection,
+      topicDirection: directionConfig.topicDirection,
+    },
+  });
+  return {
+    skipped: false,
+    created: plan.creates.length,
+    updated: plan.updates.length,
+    deleted: deletionIds.length,
+    candidates: upstreamTopics.length,
+    selected: topics.length,
+    strictSelected: strictTopics.length,
+    smartFilled: Math.max(0, topics.length - strictTopics.length),
+    refreshConsumed: refreshRequested,
+    targetDirection: directionConfig.targetDirection,
+    topicDirection: directionConfig.topicDirection,
+  };
+}
+
 function taskLink(threadId) {
   return `https://xyq.jianying.com/home?tab_name=integrated-agent&thread_id=${encodeURIComponent(threadId)}&agent_name=pippit_nest_agent`;
 }
@@ -473,6 +938,28 @@ async function downloadHttp(url, targetBase) {
   const target = `${targetBase}${ext}`;
   fs.writeFileSync(target, Buffer.from(await response.arrayBuffer()));
   return target;
+}
+
+async function imageUrlDataUrl(url, {
+  fetchImpl = fetch,
+  maxBytes = 8 * 1024 * 1024,
+} = {}) {
+  const response = await fetchImpl(url, {
+    headers: {
+      Accept: 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+      Referer: 'https://www.douyin.com/',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/138.0 Safari/537.36',
+    },
+  });
+  if (!response.ok) throw new Error(`热点封面下载失败（HTTP ${response.status}）`);
+  const contentType = String(response.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+  if (!/^image\/(?:jpeg|png|webp|gif)$/i.test(contentType)) {
+    throw new Error(`热点封面格式不受支持：${contentType || 'unknown'}`);
+  }
+  const bytes = Buffer.from(await response.arrayBuffer());
+  if (!bytes.length) throw new Error('热点封面为空');
+  if (bytes.length > maxBytes) throw new Error(`热点封面超过 ${Math.ceil(maxBytes / 1024 / 1024)} MB`);
+  return `data:${contentType};base64,${bytes.toString('base64')}`;
 }
 
 function downloadReferenceVideo(url, outputDir) {
@@ -514,6 +1001,40 @@ function downloadBaseAttachment(tableId, recordId, attachmentValue, outputDir) {
   const files = fs.readdirSync(outputDir);
   if (!files.length) throw new Error('飞书附件下载后未找到文件');
   return path.join(outputDir, files[0]);
+}
+
+async function downloadPersonaImage(persona, workDir, {
+  downloadAttachment = downloadBaseAttachment,
+  download = downloadHttp,
+} = {}) {
+  const attachmentFile = downloadAttachment(
+    CONFIG.persona_table_id,
+    persona.record_id,
+    persona['人物形象'],
+    path.join(workDir, 'selected-persona-attachment'),
+  );
+  if (attachmentFile) return attachmentFile;
+
+  const personaUrl = extractMarkdownUrl(persona['人物形象链接（内部）']) || persona['人物形象链接（内部）'];
+  if (!personaUrl) throw new Error('所选择的人设没有可用的人物形象，请先生成人物形象');
+  return download(personaUrl, path.join(workDir, 'selected-persona'));
+}
+
+function createPersonaFaceCrop(personaFile, outputFile, spawn = spawnSync) {
+  if (!personaFile || !outputFile) return '';
+  fs.mkdirSync(path.dirname(outputFile), { recursive: true });
+  const result = spawn('ffmpeg', [
+    '-y', '-hide_banner', '-loglevel', 'error',
+    '-i', personaFile,
+    '-vf', 'crop=iw*0.46:iw*0.46:(iw-ow)/2:ih*0.025,scale=1024:1024:flags=lanczos',
+    '-frames:v', '1',
+    outputFile,
+  ], {
+    cwd: ROOT,
+    encoding: 'utf8',
+    windowsHide: true,
+  });
+  return result.status === 0 && fs.existsSync(outputFile) ? outputFile : '';
 }
 
 async function resolveReferenceSource({ attachmentFile, referenceUrl, download }) {
@@ -937,15 +1458,26 @@ async function cleanupRelaySegmentMedia(row, recordId) {
   }
 }
 
-function buildVideoGenerationMessage({ referenceDurationSeconds, fallbackUrl = '', videoPrompt = '', videoModel = '' }) {
+function buildVideoGenerationMessage({
+  referenceDurationSeconds,
+  fallbackUrl = '',
+  videoPrompt = '',
+  videoModel = '',
+  hasPersonaFaceCrop = false,
+}) {
   const model = videoModelChoice(videoModel);
   const durationInstruction = Number.isFinite(referenceDurationSeconds)
     ? `参考视频检测时长为 ${referenceDurationSeconds.toFixed(3)} 秒。最终视频必须与参考视频时长一致，误差不得超过 1 秒。`
     : '生成前必须先读取参考视频并检测其精确时长；最终视频必须以检测到的参考时长为准，误差不得超过 1 秒。';
   return [
-    '使用已上传的所选人设形象和参考视频生成最终视频。',
+    fallbackUrl
+      ? '使用已上传的所选人设形象和下方抖音分享链接中的参考视频生成最终视频。必须读取分享链接对应的原视频，不得把链接文字当作画面描述。'
+      : '使用已上传的所选人设形象和参考视频生成最终视频。',
     `必须且只能使用指定视频模型：${model.name}；模型标识：${model.id}。不得自动改用其他模型。`,
     '已上传的所选人设图片是最终视频的唯一人物形象来源。必须把参考视频中的人物完整替换为该人设；不得保留或混合参考视频原人物的脸、五官、发型、年龄、服装、体型和气质。',
+    hasPersonaFaceCrop
+      ? '上传素材中的第一张图片是人设全身与服装基准，第二张图片是由同一张人设图裁出的脸部身份特写。两张图是同一个人：必须以第二张图锁定脸型、五官结构和个人面部特征，以第一张图锁定发型、服装、体型和整体气质；不得混入参考视频原人物的脸。'
+      : '人设图中的脸型、五官结构和个人面部特征必须跨全部镜头保持一致；不得只复刻服装而改变人物的脸。',
     '参考视频原人物仅用于提供动作、口型、走位和时间点，不得作为人物外观来源。',
     '最终成片画布必须严格为 9:16 竖屏，建议分辨率为 1080×1920 或 720×1280；主体画面必须铺满整个竖屏画布并延伸到四边。',
     '禁止使用横版画布、横版容器、模糊复制侧边背景、镜像延展、左右补边、黑边、白边、画框、三联画或把竖屏内容嵌入横屏背景。参考素材画幅不同时，只能通过裁切、重新构图和镜头重排适配 9:16。',
@@ -954,8 +1486,12 @@ function buildVideoGenerationMessage({ referenceDurationSeconds, fallbackUrl = '
     '如果模型内部需要分段生成，第二段必须承接第一段之后的参考视频内容，不得把第一段动作、镜头或画面复制到第二段。',
     '不得循环、回放或重新开始参考视频中的任何片段。',
     '完整复刻参考视频的动作、动作顺序与时间点、对白、台词、旁白、原声、BGM、音效、镜头、运镜、构图、场景调度和剪辑节奏，保持音画同步。',
+    '除人物外观外，必须继承参考视频原场景、色调、光线、道具、机位和构图；不得使用人设图片的背景替换参考视频场景，不得写入或执行“只参考动作、不继承场景与色调”等相反要求。',
+    '先检查参考视频的 BGM 是否从头到尾连贯。最终成片必须直接完整复用原视频 BGM 音轨，并与参考时间线同步；不得切割、截断、重排或拼接 BGM，不得另生成或替换 BGM。',
     '必须按参考视频从 0 秒到结尾的真实时间线连续生成；第二段必须承接第一段之后的参考视频内容，不得把第一段动作、镜头或画面复制到第二段，不得循环、回放或重新开始。',
-    fallbackUrl ? `参考视频链接：${fallbackUrl}。本地下载受平台限制，请直接读取该链接作为参考视频。` : '',
+    '每一个视频生成分段都必须把对应的参考视频或参考视频片段放入 VideoList；第二段及后续分段还必须把上一段尾帧放入 ImageList 作为连续性约束。',
+    '如果参考视频读取失败、审核被拦截或任一分段不能继续使用参考视频，必须立即停止并明确返回失败。禁止删除或省略 VideoList 后改成纯图生视频、纯文本视频或其他替代成片。',
+    fallbackUrl ? `抖音参考视频分享链接：${fallbackUrl}。必须始终使用这个分享链接对应的同一条原视频作为参考，不得替换为其他视频版本。` : '',
     videoPrompt ? `补充视频提示词：${videoPrompt}` : '',
     '参考视频优先级最高；补充提示词不得覆盖参考视频内容。无需展示方案，直接生成最终视频。',
   ].filter(Boolean).join('\n');
@@ -1072,7 +1608,14 @@ async function getXyqRun(threadId, runId, route = {}) {
   return data.thread?.run_list?.[0] || {};
 }
 
-async function completeXyqTask({ message, assetIds, kind, onRun, route = {} }) {
+async function completeXyqTask({
+  message,
+  assetIds,
+  kind,
+  onRun,
+  route = {},
+  validation = {},
+}) {
   let submitted = await submitXyq(message, assetIds, '', route);
   if (!submitted.threadId || !submitted.runId) throw new Error('小云雀提交未返回线程ID或运行ID');
   await onRun(submitted);
@@ -1082,14 +1625,12 @@ async function completeXyqTask({ message, assetIds, kind, onRun, route = {} }) {
   while (Date.now() < deadline) {
     await sleep(CONFIG.poll_interval_seconds * 1000);
     const runData = await getXyqRun(submitted.threadId, submitted.runId, route);
-    const state = Number(runData.state);
-    if (state === 3) {
-      const resultUrl = chooseArtifactUrl(runData, kind);
-      if (!resultUrl) throw new Error(`小云雀任务完成但未找到${kind === 'video' ? '视频' : '图片'}结果`);
-      return { ...submitted, resultUrl, raw: runData };
+    const outcome = inspectXyqRun(runData, kind, validation);
+    if (outcome.status === 'completed') {
+      return { ...submitted, resultUrl: outcome.resultUrl, raw: runData };
     }
-    if (state === 4) throw new Error(`小云雀生成失败: ${runData.fail_reason || '未知原因'}`);
-    if (state === 5) throw new Error('小云雀任务已取消');
+    if (outcome.status === 'failed') throw new Error(outcome.error);
+    const state = Number(runData.state);
     if (state === 9 && !confirmed) {
       submitted = await submitXyq('确认。严格按照已提交要求直接生成最终结果，不再询问或展示方案。', [], submitted.threadId, route);
       confirmed = true;
@@ -1297,14 +1838,36 @@ async function kimiPublishCopy(row, contentRow = {}, runtime = ACTIVE_MODEL_RUNT
   return parsePublishCopy(json.choices?.[0]?.message?.content);
 }
 
-async function processPlatformPublish(row, contentById, accountById) {
+async function resolvePlatformPublishVideoUrl(row, source, contentRow, workDir) {
+  const displayedUrl = extractMarkdownUrl(row['最终视频']);
+  if (displayedUrl) return displayedUrl;
+  const sourceUrl = extractMarkdownUrl(contentRow['最终视频链接']) || extractMarkdownUrl(contentRow['最终视频']);
+  if (sourceUrl) return sourceUrl;
+  if (source.kind !== 'relay') throw new Error('所选内容没有可读取的最终视频链接');
+  const attachmentFile = downloadBaseAttachment(
+    CONFIG.relay_content_table_id,
+    source.recordId,
+    contentRow['最终视频'],
+    path.join(workDir, 'relay-final-video'),
+  );
+  if (!attachmentFile) throw new Error('所选中转站内容尚未生成最终视频');
+  const uploaded = await createWorkerRelayMediaStore().upload(attachmentFile, {
+    recordId: row.record_id,
+    role: 'platform-publish',
+  });
+  return uploaded.url;
+}
+
+async function processPlatformPublish(row, contentById, relayContentById, accountById) {
   const recordId = row.record_id;
-  const contentId = linkedRecordId(row['内容']);
+  const source = platformContentSource(row);
   const accountId = linkedRecordId(row['平台账号']);
-  const contentRow = contentById.get(contentId) || {};
+  const contentRow = source.error
+    ? {}
+    : (source.kind === 'relay' ? relayContentById : contentById).get(source.recordId) || {};
   const accountRow = accountById.get(accountId) || {};
   const platform = firstOption(row['平台']) || firstOption(accountRow['平台']) || '未指定平台';
-  const contentNumber = row['内容流水号'] || contentRow['内容流水号'] || contentId;
+  const contentNumber = row['内容流水号'] || contentRow['内容流水号'] || source.recordId || '未选择内容';
   const accountNumber = accountRow['账号编号'] || accountId;
   const taskName = `${contentNumber}-${platform}-${accountNumber}`;
   updateRecord(CONFIG.platform_publish_table_id, recordId, {
@@ -1316,7 +1879,11 @@ async function processPlatformPublish(row, contentById, accountById) {
   });
   log('开始生成平台发布文案', { recordId, taskName });
   try {
-    const generated = await kimiPublishCopy({ ...row, '平台': platform, '内容流水号': contentNumber }, contentRow);
+    if (source.error) throw new Error(source.error);
+    const workDir = path.join(RUNTIME, `platform-copy-${recordId}`);
+    fs.mkdirSync(workDir, { recursive: true });
+    const videoUrl = await resolvePlatformPublishVideoUrl(row, source, contentRow, workDir);
+    const generated = await kimiPublishCopy({ ...row, '平台': platform, '内容流水号': contentNumber, '最终视频': videoUrl }, contentRow);
     updateRecord(CONFIG.platform_publish_table_id, recordId, {
       '发布任务': taskName,
       '发布标题': generated.title,
@@ -1365,17 +1932,22 @@ function openPublishBridge(taskId) {
   return url;
 }
 
-async function processConfirmedPublish(row, accountById, { retry = false } = {}) {
+async function processConfirmedPublish(row, contentById, relayContentById, accountById, { retry = false } = {}) {
   const recordId = row.record_id;
   const accountRecordId = linkedRecordId(row['平台账号']);
   const account = accountById.get(accountRecordId);
-  const videoUrl = extractMarkdownUrl(row['最终视频']);
+  const source = platformContentSource(row);
   const retryCount = Number(row['重试次数'] || 0);
   let attempt = retry ? retryCount + 1 : 0;
 
   try {
     const publishAttempt = buildPublishAttempt(row, { retry });
     attempt = publishAttempt.attempt;
+    if (source.error) throw new Error(source.error);
+    const contentRow = (source.kind === 'relay' ? relayContentById : contentById).get(source.recordId) || {};
+    const workDir = path.join(RUNTIME, `platform-publish-${recordId}`);
+    fs.mkdirSync(workDir, { recursive: true });
+    const videoUrl = await resolvePlatformPublishVideoUrl(row, source, contentRow, workDir);
     if (!account) throw new Error('未找到关联的平台账号记录');
     if (firstOption(account['是否启用']) !== '是') throw new Error('关联的平台账号未启用');
     if (firstOption(account['登录状态']) !== '有效') throw new Error('关联的平台账号登录状态不是“有效”');
@@ -1587,35 +2159,87 @@ async function processContent(row, personaById) {
     const personaId = linkedRecordId(row['人设']);
     const persona = personaById.get(personaId);
     if (!persona) throw new Error('未找到所选择的人设记录');
-    const personaUrl = extractMarkdownUrl(persona['人物形象链接（内部）']) || persona['人物形象链接（内部）'];
-    if (!personaUrl) throw new Error('所选择的人设没有可用的人物形象，请先生成人物形象');
-
-    const personaFile = await downloadHttp(personaUrl, path.join(workDir, 'selected-persona'));
+    row['人设正文'] = String(persona['人设'] || '').trim();
+    let videoPrompt = String(row['视频提示词'] || '').trim();
+    if (shouldGeneratePromptFromLibrary(row)) {
+      const promptRequest = buildPromptLibraryVideoRequest(row);
+      const generated = await ACTIVE_MODEL_RUNTIME.completeChat({
+        row,
+        fieldName: '文本/分析模型',
+        capability: '文本',
+        defaultPurpose: '提示词',
+        messages: promptRequest.messages,
+        temperature: promptRequest.temperature,
+      });
+      videoPrompt = generated.content;
+      row['视频提示词'] = videoPrompt;
+      row['生成视频提示词'] = ['否'];
+      updateRecord(CONFIG.content_table_id, recordId, {
+        '视频提示词': videoPrompt,
+        '生成视频提示词': '否',
+      });
+      log('小云雀视频提示词已根据提示词库生成', {
+        recordId,
+        topic: row['提示词库热点标题'] || '',
+        model: generated.access?.modelId || '',
+      });
+    } else if (firstOption(row['生成视频提示词']) === '是' && videoPrompt) {
+      row['生成视频提示词'] = ['否'];
+      updateRecord(CONFIG.content_table_id, recordId, { '生成视频提示词': '否' });
+    }
+    const personaFile = await downloadPersonaImage(persona, workDir);
     const assetIds = [uploadXyqAsset(personaFile, videoRoute)];
+    const personaFaceCrop = createPersonaFaceCrop(
+      personaFile,
+      path.join(workDir, 'persona-identity', 'face-reference.jpg'),
+    );
+    if (personaFaceCrop) {
+      assetIds.push(uploadXyqAsset(personaFaceCrop, videoRoute));
+    } else {
+      log('人设脸部身份特写生成失败，本次仍使用原始高清人设图', { recordId });
+    }
     const referenceAttachment = row['参考视频文件'];
     const referenceUrl = extractMarkdownUrl(row['参考视频链接']) || row['参考视频链接'] || '';
-    const attachmentFile = downloadBaseAttachment(CONFIG.content_table_id, recordId, referenceAttachment, path.join(workDir, 'reference-file'));
-    const referenceSource = await resolveReferenceSource({
-      attachmentFile,
-      referenceUrl,
-      download: (url) => downloadReferenceVideo(url, path.join(workDir, 'reference-video')),
-    });
-    const referenceFile = referenceSource.file;
-    if (referenceFile) {
-      assetIds.push(uploadXyqAsset(referenceFile, videoRoute));
+    let referenceDurationSeconds = null;
+    let referenceFallbackUrl = referenceUrl;
+    if (referenceUrl) {
+      try {
+        const resolved = await resolveDouyinShareVideo(referenceUrl);
+        referenceDurationSeconds = resolved.durationSeconds;
+        log('小云雀任务保留抖音分享链接，并完成参考时长预检', {
+          recordId,
+          durationSeconds: referenceDurationSeconds,
+        });
+      } catch (error) {
+        log('抖音分享链接时长未能本地预检，改由小云雀读取原分享链接', {
+          recordId,
+          error: error.message,
+        });
+      }
+    } else {
+      const attachmentFile = downloadBaseAttachment(
+        CONFIG.content_table_id,
+        recordId,
+        referenceAttachment,
+        path.join(workDir, 'reference-file'),
+      );
+      if (!attachmentFile) throw new Error('视频复刻必须填写抖音参考视频分享链接');
+      assetIds.push(uploadXyqAsset(attachmentFile, videoRoute));
+      referenceDurationSeconds = probeVideoDuration(attachmentFile);
+      referenceFallbackUrl = '';
     }
-    const referenceDurationSeconds = probeVideoDuration(referenceFile);
     const selectedVideoAccess = ACTIVE_MODEL_RUNTIME?.resolve({
       row, fieldName: '视频生成模型', capability: '视频生成',
       defaultPurpose: '视频生成', legacyFieldName: '模型选用',
     });
     const message = buildVideoGenerationMessage({
       referenceDurationSeconds,
-      fallbackUrl: referenceSource.fallbackUrl,
-      videoPrompt: row['视频提示词'] || '',
+      fallbackUrl: referenceFallbackUrl,
+      videoPrompt,
       videoModel: selectedVideoAccess
         ? { name: selectedVideoAccess.modelName || selectedVideoAccess.modelId, id: selectedVideoAccess.modelId }
         : row['模型选用'],
+      hasPersonaFaceCrop: Boolean(personaFaceCrop),
     });
 
     const result = await completeXyqTask({
@@ -1623,6 +2247,10 @@ async function processContent(row, personaById) {
       assetIds,
       kind: 'video',
       route: videoRoute,
+      validation: {
+        expectedModelId: selectedVideoAccess?.modelId || videoModelChoice(row['模型选用']).id,
+        requireReferenceVideo: true,
+      },
       onRun: async ({ threadId, runId, webLink }) => updateRecord(CONFIG.content_table_id, recordId, {
         '小云雀线程ID': threadId,
         '小云雀运行ID': runId,
@@ -1654,7 +2282,14 @@ async function resumeContent(row) {
       runtime: ACTIVE_MODEL_RUNTIME, row, fieldName: '视频生成模型',
       capability: '视频生成', defaultPurpose: '视频生成', legacyFieldName: '模型选用',
     });
-    const outcome = inspectXyqRun(runData, 'video');
+    const selectedVideoAccess = ACTIVE_MODEL_RUNTIME?.resolve({
+      row, fieldName: '视频生成模型', capability: '视频生成',
+      defaultPurpose: '视频生成', legacyFieldName: '模型选用',
+    });
+    const outcome = inspectXyqRun(runData, 'video', {
+      expectedModelId: selectedVideoAccess?.modelId || videoModelChoice(row['模型选用']).id,
+      requireReferenceVideo: true,
+    });
     if (outcome.status === 'pending') {
       log('视频任务仍在生成', { recordId, number: row['内容流水号'] });
       return;
@@ -2268,6 +2903,27 @@ async function main() {
 
   try {
     initializeModelRuntime();
+    if (process.argv.includes('--sync-hot-only')) {
+      const syncResult = await syncDouyinPromptLibrary({ force: true });
+      log('抖音热点提示词库已执行手动强制同步', syncResult);
+      return;
+    }
+    let promptLibraryRows = [];
+    if (CONFIG.prompt_library_table_id) {
+      try {
+        const syncResult = await syncDouyinPromptLibrary();
+        if (!syncResult.skipped) {
+          log('抖音热榜提示词库同步完成', syncResult);
+        }
+      } catch (error) {
+        log('抖音热榜提示词库同步失败，本轮继续使用已有记录', { error: error.message });
+      }
+      promptLibraryRows = listAllRecords(CONFIG.prompt_library_table_id, [
+        '热点标题', '热榜ID', '建议提示词', '成交适配分', '涨粉适配分',
+        '复刻适配分', '系统推荐方向', '推荐理由', '是否启用',
+      ]);
+    }
+    const promptLibraryById = new Map(promptLibraryRows.map((row) => [row.record_id, row]));
     const personaFields = ['人设编号', '手机编号', '人设类型', '输入人设要求', '参考图片', '人设', '人物形象链接（内部）', '人物形象', '人设文本模型', '人物形象模型', '是否立刻生成人设', '人设生成状态', '形象线程ID', '形象运行ID', '失败原因'];
     let personas = listRecords(CONFIG.persona_table_id, personaFields);
     const personaJobs = personas
@@ -2287,8 +2943,9 @@ async function main() {
 
     personas = listRecords(CONFIG.persona_table_id, personaFields);
     const personaById = new Map(personas.map((row) => [row.record_id, row]));
-    const contentFields = ['内容流水号', '人设', '视频提示词', '参考视频链接', '参考视频文件', '模型选用', '文本/分析模型', '视频生成模型', '是否立刻生成视频', '生成状态', '小云雀线程ID', '小云雀运行ID'];
-    const contents = listRecords(CONFIG.content_table_id, contentFields);
+    const contentFields = ['内容流水号', '人设', '提示词库', '目标方向', '生成视频提示词', '视频提示词', '参考视频链接', '参考视频文件', '最终视频', '模型选用', '文本/分析模型', '视频生成模型', '是否立刻生成视频', '生成状态', '小云雀线程ID', '小云雀运行ID'];
+    const contents = listRecords(CONFIG.content_table_id, contentFields)
+      .map((row) => hydratePromptLibrarySelection(row, promptLibraryById));
     for (const row of contents) {
       if (!firstOption(row['模型选用'])) {
         row['模型选用'] = 'Seedance 2.0 Mini';
@@ -2304,14 +2961,16 @@ async function main() {
     }
 
     let relayContentJobs = [];
+    let relayContents = [];
     if (CONFIG.relay_content_table_id) {
       const relayFields = [
-        '内容流水号', '人设', '输入内容要求', '参考图片', '参考视频', '参考视频链接', '尾帧图片',
+        '内容流水号', '人设', '提示词库', '目标方向', '输入内容要求', '参考图片', '参考视频', '参考视频链接', '尾帧图片',
         '文本/分析模型', '视频生成选用', '视频提示词', '生成方式', '视频时长', '画面比例', '随机种子',
         '生成视频提示词', '是否立刻生成视频', '生成状态', '外部任务ID',
         '最终视频链接', '提交时间', '完成时间', '失败原因',
       ];
-      const relayContents = listRecords(CONFIG.relay_content_table_id, relayFields)
+      relayContents = listRecords(CONFIG.relay_content_table_id, [...relayFields, '最终视频'])
+        .map((row) => hydratePromptLibrarySelection(row, promptLibraryById))
         .map((row) => hydrateRelayPersona(row, personaById));
       relayContentJobs = relayContents
         .map((row) => ({ row, action: relayContentJobAction(row) }))
@@ -2352,8 +3011,9 @@ async function main() {
     const platformAccounts = listRecords(CONFIG.platform_account_table_id, platformAccountFields);
     const accountById = new Map(platformAccounts.map((row) => [row.record_id, row]));
     const contentById = new Map(contents.map((row) => [row.record_id, row]));
+    const relayContentById = new Map(relayContents.map((row) => [row.record_id, row]));
     const platformPublishFields = [
-      '发布任务', '内容', '内容流水号', '平台账号', '平台', '最终视频',
+      '发布任务', '小云雀内容', '中转站内容', '内容流水号', '平台账号', '平台', '最终视频',
       '发布标题', '发布文案', '标签', '文案生成状态', '确认发布', '发布状态',
       '发布文案模型', '计划发布时间', 'MultiPost任务ID', '幂等键', '重试次数',
     ];
@@ -2362,8 +3022,8 @@ async function main() {
       .map((row) => ({ row, action: platformPublishJobAction(row) }))
       .filter((job) => job.action !== 'none');
     for (const { row, action } of platformPublishJobs) {
-      if (action === 'publish') await processConfirmedPublish(row, accountById);
-      else if (action === 'retry') await processConfirmedPublish(row, accountById, { retry: true });
+      if (action === 'publish') await processConfirmedPublish(row, contentById, relayContentById, accountById);
+      else if (action === 'retry') await processConfirmedPublish(row, contentById, relayContentById, accountById, { retry: true });
       else if (action === 'invalid-retry') {
         updateRecord(CONFIG.platform_publish_table_id, row.record_id, buildInvalidPublishPatch(row));
         log('平台发布重试配置无效', { recordId: row.record_id, taskName: row['发布任务'] });
@@ -2376,7 +3036,7 @@ async function main() {
           taskId: row['MultiPost任务ID'],
         });
       }
-      else await processPlatformPublish(row, contentById, accountById);
+      else await processPlatformPublish(row, contentById, relayContentById, accountById);
     }
     log('本轮扫描完成', {
       personaJobs: personaJobs.length,
@@ -2400,4 +3060,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { buildInvalidPublishPatch, buildOrphanedPublishTaskPatch, buildLtxAnalysisRequest, buildLtxCompletedPatch, buildLtxFailedPatch, buildLtxPayload, buildLtxStartPatch, buildPersonaImagePrompt, buildPersonaImageRequest, buildPublishAttempt, buildPublishCopyPrompt, buildRelaySegmentPrompt, buildVideoGenerationMessage, collectUrls, chooseArtifactUrl, completeContentVideo, concatRelaySegments, contentJobAction, decodeDouyinJsonString, downloadHttp, extractDouyinShareVideo, extractMarkdownUrl, firstOption, formatPublishTags, hydrateRelayPersona, inspectLtxTask, inspectXyqRun, linkedRecordId, listRecords, ltxJobAction, ltxModelChoice, ltxReferenceUrl, parsePublishCopy, personaJobAction, platformPublishJobAction, probeVideoDuration, processConfirmedPublish, processLtxContent, readVideoDataUrl, relaySegmentPlan, relaySegmentSecondsForAccess, relaySegmentTimeline, relayTaskDescriptor, requestLtxStoryboard, resolveDouyinShareVideo, resolveReferenceSource, resumeLtxContent, resolveFieldIds, rowsFromEnvelope, serializeRelayTaskDescriptor, splitRelayReferenceVideo, videoModelChoice };
+module.exports = { buildInvalidPublishPatch, buildOrphanedPublishTaskPatch, buildLtxAnalysisRequest, buildLtxCompletedPatch, buildLtxFailedPatch, buildLtxPayload, buildLtxStartPatch, buildPersonaImagePrompt, buildPersonaImageRequest, buildPromptLibraryVideoRequest, buildPublishAttempt, buildPublishCopyPrompt, buildRelaySegmentPrompt, buildVideoGenerationMessage, collectUrls, chooseArtifactUrl, completeContentVideo, concatRelaySegments, contentJobAction, createPersonaFaceCrop, decodeDouyinJsonString, downloadHttp, downloadPersonaImage, extractDouyinShareVideo, extractMarkdownUrl, firstOption, formatPublishTags, hydratePromptLibrarySelection, hydrateRelayPersona, imageUrlDataUrl, inspectLtxTask, inspectXyqRun, inspectXyqVideoContract, linkedRecordId, listAllRecords, listRecords, ltxJobAction, ltxModelChoice, ltxReferenceUrl, parsePublishCopy, personaJobAction, platformContentSource, platformPublishJobAction, probeVideoDuration, processConfirmedPublish, processLtxContent, promptLibrarySyncDue, readVideoDataUrl, relaySegmentPlan, relaySegmentSecondsForAccess, relaySegmentTimeline, relayTaskDescriptor, requestLtxStoryboard, resolveDouyinShareVideo, resolvePlatformPublishVideoUrl, resolveReferenceSource, resumeLtxContent, resolveFieldIds, rowsFromEnvelope, serializeRelayTaskDescriptor, shouldGeneratePromptFromLibrary, splitRelayReferenceVideo, syncDouyinPromptLibrary, videoModelChoice };

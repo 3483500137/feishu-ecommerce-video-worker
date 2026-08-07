@@ -51,6 +51,9 @@ test('relay prompt generation choice controls initial generation and regeneratio
     '生成状态': [], '输入内容要求': '展示新款汉服', '生成视频提示词': ['否'],
   }), 'none');
   assert.equal(relayContentJobAction({
+    '生成状态': [], '输入内容要求': '', '提示词库内容': '围绕夏日旅行创作', '生成视频提示词': ['是'],
+  }), 'generate-prompt');
+  assert.equal(relayContentJobAction({
     '生成状态': [], '输入内容要求': '展示新款汉服', '生成视频提示词': ['是'],
   }), 'generate-prompt');
   assert.equal(relayContentJobAction({
@@ -170,6 +173,23 @@ test('prompt request contains requirements and selected text model', () => {
   assert.match(request.messages[1].content, /制作复刻视频/);
   assert.match(request.messages[1].content, /参考图片、参考视频或参考链接/);
   assert.match(request.messages[1].content, /9:16/);
+});
+
+test('prompt request can use a selected prompt-library suggestion as the creative source', () => {
+  const access = { ...videoAccess, protocol: 'chat-completions', modelId: 'moonshot-v1-8k' };
+  const request = buildRelayPromptRequest({
+    '输入内容要求': '',
+    '提示词库内容': '围绕昆明小炒的城市烟火气创作，开头三秒展示爆炒特写',
+    '目标方向': ['电商成交'],
+    '生成方式': ['文生视频'],
+    '视频时长': 8,
+    '画面比例': ['9:16'],
+  }, access);
+
+  assert.match(request.messages[1].content, /提示词库建议/);
+  assert.match(request.messages[1].content, /昆明小炒/);
+  assert.match(request.messages[1].content, /唯一目标方向：电商成交/);
+  assert.match(request.messages[1].content, /不得虚构价格、优惠、库存、功效/);
 });
 
 test('reference-video prompt analysis sends the actual video to the vision model', () => {

@@ -3,3 +3,10 @@
 *.vbs text eol=crlf
 *.base binary
 *.png binary
+
+# Large media is kept in Git LFS so the source repository stays usable.
+*.mp4 filter=lfs diff=lfs merge=lfs -text
+解说配音素材/**/*.wav filter=lfs diff=lfs merge=lfs -text
+解说配音素材/**/*.jpg filter=lfs diff=lfs merge=lfs -text
+.codex_doc_qa_final/*.pdf filter=lfs diff=lfs merge=lfs -text
+.codex_doc_qa_final/*.png filter=lfs diff=lfs merge=lfs -text

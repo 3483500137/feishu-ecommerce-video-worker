@@ -58,7 +58,9 @@ function extractTryCloudflareUrl(line) {
 function createMediaRequestHandler({ storageDir = DEFAULT_STORAGE_DIR, identity = null } = {}) {
   return (request, response) => {
     response.setHeader('X-Content-Type-Options', 'nosniff');
-    response.setHeader('Cache-Control', 'no-store');
+    // The publishing bridge uploads this exact stream. no-transform prevents
+    // intermediaries from applying image/video optimizations or transcoding.
+    response.setHeader('Cache-Control', 'private, no-store, no-transform');
     if (request.method !== 'GET') {
       response.writeHead(405, { Allow: 'GET' });
       response.end();

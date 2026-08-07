@@ -20,6 +20,7 @@
   "scripts": {
     "doctor": "node scripts/doctor.js",
     "start": "node src/worker.js --once",
+    "sync:hot": "node src/worker.js --sync-hot-only",
     "start:media-relay": "node src/media-relay-server.js",
     "start:multipost-account": "node src/multipost-account-server.js",
     "test": "node --test test/*.test.js"

@@ -230,7 +230,10 @@ function createAdapterRegistry({
       return { valid: Boolean(secret && access.modelId), modelFound: Boolean(access.modelId), models: await this.listModels(access) };
     },
     async submitSkill({ access, secret, message, assetIds = [], threadId = '' }) {
-      const body = { message };
+      const body = {
+        message,
+        general_agent_settings: { video_model: access.modelId },
+      };
       if (assetIds.length) body.asset_ids = assetIds;
       if (threadId) body.thread_id = threadId;
       const response = await requestJson({
