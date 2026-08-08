@@ -32,6 +32,7 @@
     "task_run_table_id": "your_task_run_table_id",
     "task_event_table_id": "your_task_event_table_id",
     "artifact_table_id": "your_artifact_table_id",
+    "human_decision_table_id": "your_human_decision_table_id",
     "member_authorization_table_id": "your_member_authorization_table_id",
     "metrics_table_id": "your_metrics_table_id"
   },

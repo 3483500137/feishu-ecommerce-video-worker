@@ -21,6 +21,7 @@
     "doctor": "node scripts/doctor.js",
     "start": "node src/worker.js --once",
     "start:bot": "node src/bot-gateway-server.js",
+    "provision:workflow-base": "node scripts/provision-workflow-base.js",
     "sync:hot": "node src/worker.js --sync-hot-only",
     "start:media-relay": "node src/media-relay-server.js",
     "start:multipost-account": "node src/multipost-account-server.js",

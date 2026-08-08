@@ -3,4 +3,5 @@ runtime/credentials.json
 runtime/credentials.json.*.tmp
 logs/
 config.json
+config.agent-framework.json
 node_modules/

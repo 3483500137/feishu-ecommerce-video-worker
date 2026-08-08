@@ -43,6 +43,7 @@ class MemoryWorkflowStore {
     this.runs = new Map();
     this.events = new Map();
     this.metrics = [];
+    this.decisions = [];
   }
 
   async createRun(run) {
@@ -78,6 +79,11 @@ class MemoryWorkflowStore {
   async recordMetric(metric) {
     this.metrics.push({ ...metric });
     return { ...metric };
+  }
+
+  async recordDecision(decision) {
+    this.decisions.push({ ...decision });
+    return { ...decision };
   }
 }
 
@@ -143,6 +149,12 @@ class WorkflowRuntime {
       id: randomUUID(), run_id: runId, type: `transition.${event}`, actor_id: actorId || '', at: timestamp,
       idempotency_key: idempotencyKey, payload: { from: run.state, to: transition.to, ...payload },
     });
+    if (transition.requires_human && typeof this.store.recordDecision === 'function') {
+      await this.store.recordDecision({
+        id: randomUUID(), run_id: runId, decision: event, actor_id: actorId || '', at: timestamp,
+        from_state: run.state, to_state: transition.to, payload: { ...payload },
+      });
+    }
     if (transition.skill && this.skills) {
       const result = await this.skills.execute(transition.skill, { ...run.input, ...payload }, { run: updated, actor_id: actorId || '' });
       await this.store.appendEvent({

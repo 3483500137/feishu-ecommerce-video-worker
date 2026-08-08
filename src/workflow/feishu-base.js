@@ -2,7 +2,7 @@
 
 const STANDARD_WORKFLOW_TABLES = Object.freeze([
   'workflow_config_table_id', 'skill_registry_table_id', 'business_task_table_id', 'task_run_table_id',
-  'task_event_table_id', 'artifact_table_id', 'member_authorization_table_id', 'metrics_table_id',
+  'task_event_table_id', 'artifact_table_id', 'human_decision_table_id', 'member_authorization_table_id', 'metrics_table_id',
 ]);
 
 function validateWorkflowBaseConfig(config = {}) {
@@ -52,7 +52,21 @@ function createFeishuWorkflowStore({ baseToken, tables, createRecord, updateReco
       const rows = await listRecords(tables.task_event_table_id, ['运行ID', '事件类型', '幂等键']);
       return rows.filter((row) => row['运行ID'] === runId).map((row) => ({ run_id: runId, type: row['事件类型'], idempotency_key: row['幂等键'] || '' }));
     },
-    async recordMetric(metric) { await createRecord(tables.metrics_table_id, { '运行ID': metric.run_id, '事件': metric.event, '记录时间': metric.at }); return { ...metric }; },
+    async recordDecision(decision) {
+      await createRecord(tables.human_decision_table_id, {
+        '决策ID': decision.id, '运行ID': decision.run_id, '决策': decision.decision,
+        '决策人ID（内部）': decision.actor_id, '发生时间': decision.at,
+        '迁移前状态': decision.from_state, '迁移后状态': decision.to_state,
+        '载荷（内部）': JSON.stringify(decision.payload || {}),
+      });
+      return { ...decision };
+    },
+    async recordMetric(metric) {
+      await createRecord(tables.metrics_table_id, {
+        '运行ID': metric.run_id, '工作流ID': metric.workflow_id, '事件': metric.event, '记录时间': metric.at,
+      });
+      return { ...metric };
+    },
   };
 }
 

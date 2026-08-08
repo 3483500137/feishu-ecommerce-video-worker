@@ -12,6 +12,15 @@ const { runLark } = require('./lark-cli');
 
 const ROOT = path.resolve(__dirname, '..');
 const configPath = process.env.FEISHU_ACCOUNT_CLONER_CONFIG || path.join(ROOT, 'config.json');
+const agentConfigPath = process.env.FEISHU_AGENT_FRAMEWORK_CONFIG || path.join(ROOT, 'config.agent-framework.json');
+
+function loadConfig() {
+  if (!fs.existsSync(configPath)) throw new Error(`未找到配置文件：${configPath}`);
+  const primary = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+  if (!fs.existsSync(agentConfigPath)) return primary;
+  const overlay = JSON.parse(fs.readFileSync(agentConfigPath, 'utf8'));
+  return { ...primary, ...overlay, workflow_base: { ...primary.workflow_base, ...overlay.workflow_base } };
+}
 
 function loadWorkflowPacks() {
   const root = path.join(ROOT, 'workflow-packs');
@@ -43,8 +52,7 @@ function createBaseTransport(config) {
 }
 
 function main() {
-  if (!fs.existsSync(configPath)) throw new Error(`未找到配置文件：${configPath}`);
-  const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+  const config = loadConfig();
   const store = createCredentialStore({ filePath: path.join(ROOT, 'runtime', 'credentials.json') });
   const secret = store.get(config.feishu_bot_secret_alias);
   if (!secret) throw new Error('未导入飞书机器人App Secret，请先写入本机DPAPI凭证库');
@@ -63,4 +71,4 @@ function main() {
 
 if (require.main === module) main();
 
-module.exports = { createBaseTransport, loadWorkflowPacks, main, rowsFromEnvelope };
+module.exports = { createBaseTransport, loadConfig, loadWorkflowPacks, main, rowsFromEnvelope };
