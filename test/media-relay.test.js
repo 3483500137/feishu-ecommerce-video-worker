@@ -180,6 +180,25 @@ test('relay HTTP handler serves health and only randomized media filenames', asy
   assert.equal(blocked.status, 404);
 });
 
+test('relay serves platform-publish videos as the original byte stream without transformation', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-original-video-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const assetKey = 'rec001-platform-publish-0123456789abcdef0123456789abcdef.mp4';
+  const original = Buffer.from([0, 0, 0, 20, 102, 116, 121, 112, 105, 115, 111, 109, 0, 255, 1, 2, 3, 4]);
+  fs.writeFileSync(path.join(root, assetKey), original);
+  const server = http.createServer(createMediaRequestHandler({ storageDir: root }));
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+
+  const response = await fetch(`http://127.0.0.1:${server.address().port}/media/${assetKey}`);
+  const streamed = Buffer.from(await response.arrayBuffer());
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('content-type'), 'video/mp4');
+  assert.equal(response.headers.get('cache-control'), 'private, no-store, no-transform');
+  assert.deepEqual(streamed, original);
+});
+
 test('relay identity endpoint is only available when the server provides its own PID', async (t) => {
   const server = http.createServer(createMediaRequestHandler({
     storageDir: t.testDir || os.tmpdir(),

@@ -32,6 +32,7 @@ function inspectSetup({
   const enabledFeatures = ['core'];
   if (config?.access_api_table_id) enabledFeatures.push('api-routing');
   if (config?.relay_content_table_id) enabledFeatures.push('relay');
+  if (config?.prompt_library_table_id) enabledFeatures.push('prompt-library');
   if (config?.ltx_content_table_id || config?.ltx_base_url) enabledFeatures.push('ltx');
   if (config?.platform_account_table_id || config?.platform_publish_table_id) enabledFeatures.push('publishing');
   for (const message of validateConfig(config, { features: enabledFeatures, env })) {

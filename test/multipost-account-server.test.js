@@ -4,6 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   buildAccountPatch,
+  buildMinimalAccountInfo,
   createAccountServer,
   publishPage,
   platformLoginUrl,
@@ -33,6 +34,10 @@ test('maps Feishu platform names to MultiPost account keys', () => {
 test('maps Kuaishou to the official creator login entry', () => {
   assert.equal(platformLoginUrl('快手'), 'https://cp.kuaishou.com/article/publish/video');
   assert.equal(platformLoginUrl('未知平台'), '');
+});
+
+test('maps Douyin to the official creator login entry', () => {
+  assert.equal(platformLoginUrl('抖音'), 'https://creator.douyin.com/creator-micro/home');
 });
 
 test('builds a verified account patch from MultiPost extension data', () => {
@@ -111,6 +116,45 @@ test('account page includes the trusted-domain and account-info extension action
   assert.match(html, /登录完成，刷新账号/);
   assert.match(html, /https:\/\/cp\.kuaishou\.com\/article\/publish\/video/);
   assert.match(html, /recvpBcfDtTfxA/);
+});
+
+test('reduces MultiPost account data to the current platform identity fields', () => {
+  assert.equal(typeof buildMinimalAccountInfo, 'function');
+  const minimal = buildMinimalAccountInfo('douyin', {
+    douyin: {
+      provider: 'douyin',
+      accountId: 'sec_uid_123',
+      username: '测试账号',
+      avatarUrl: 'https://example.com/avatar.png',
+      extraData: { oversized: 'x'.repeat(256 * 1024) },
+    },
+    x: {
+      provider: 'x',
+      accountId: 'other-account',
+      username: '其他账号',
+    },
+  });
+
+  assert.deepEqual(minimal, {
+    douyin: {
+      provider: 'douyin',
+      accountId: 'sec_uid_123',
+      username: '测试账号',
+    },
+  });
+});
+
+test('Douyin account page embeds the creator login URL and account refresh action', async (t) => {
+  const server = createAccountServer({ updatePlatformAccount() {} });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => server.close());
+  const { port } = server.address();
+  const response = await fetch(`http://127.0.0.1:${port}/multipost/account?record_id=recDouyin12345&platform=${encodeURIComponent('抖音')}`);
+  const html = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.match(html, /https:\/\/creator\.douyin\.com\/creator-micro\/home/);
+  assert.match(html, /MULTIPOST_EXTENSION_REFRESH_DOUYIN_ACCOUNT_INFO/);
 });
 
 test('account server mounts the local API configuration handler on the same port', async (t) => {
@@ -206,6 +250,23 @@ test('publish bridge refreshes the current Kuaishou account before comparing the
   const html = await response.text();
 
   assert.match(html, /MULTIPOST_EXTENSION_REFRESH_KUAISHOU_ACCOUNT_INFO/);
+});
+
+test('publish bridge refreshes the current Douyin account before comparing the binding', async (t) => {
+  const server = createAccountServer({
+    updatePlatformAccount() {},
+    readPublishTask() {
+      return { taskId: 'mpx-refresh-douyin-account', status: 'queued' };
+    },
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => server.close());
+  const { port } = server.address();
+
+  const response = await fetch(`http://127.0.0.1:${port}/multipost/publish?task_id=mpx-refresh-douyin-account`);
+  const html = await response.text();
+
+  assert.match(html, /MULTIPOST_EXTENSION_REFRESH_DOUYIN_ACCOUNT_INFO/);
 });
 
 test('publish bridge account mismatch identifies the bound and detected accounts', async (t) => {

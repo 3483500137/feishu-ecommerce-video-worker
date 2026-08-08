@@ -179,6 +179,9 @@ test('XYQ adapter uses the skill endpoints and bearer access key', async () => {
   assert.deepEqual(result, { threadId: 'thread-1', runId: 'run-1', raw: { thread_id: 'thread-1', run_id: 'run-1' } });
   assert.match(calls[0].url, /\/api\/biz\/v1\/skill\/submit_run$/);
   assert.equal(calls[0].options.headers.Authorization, 'Bearer xyq-secret');
+  assert.deepEqual(JSON.parse(calls[0].options.body).general_agent_settings, {
+    video_model: 'Seedance_2.0_mini',
+  });
 });
 
 test('idempotent model listing retries a temporary 429 without delaying tests', async () => {

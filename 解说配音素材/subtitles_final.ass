@@ -1,0 +1,37 @@
+﻿[Script Info]
+ScriptType: v4.00+
+PlayResX: 1920
+PlayResY: 1080
+WrapStyle: 0
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default, Microsoft YaHei, 48, &H00FFFFFF, &H00FFFFFF, &HFF000000, &H90404040, 0, 0, 0, 0, 100, 100, 0, 0, 4, 14, 0, 2, 120, 120, 56, 1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:00.00,0:00:05.30,Default,,0,0,0,,这是一套基于飞书多维表格的电商视频复刻工作流\N。
+Dialogue: 0,0:00:05.48,0:00:17.74,Default,,0,0,0,,运营只需要在表格里维护人设、参考视频、模型和发布账号，\N后面的生成、回填和发布由本地 Worker 自动执行。
+Dialogue: 0,0:00:17.92,0:00:20.98,Default,,0,0,0,,第一步，是配置模型接入。
+Dialogue: 0,0:00:21.16,0:00:29.74,Default,,0,0,0,,每个文本、图片、视频或 LTX 模型，都在接\N入 API 表里单独管理。
+Dialogue: 0,0:00:29.92,0:00:38.58,Default,,0,0,0,,密钥只保存到当前电脑的 Windows DPAPI 凭据库，\N不写进飞书，也不写进配置文件。
+Dialogue: 0,0:00:38.76,0:00:41.50,Default,,0,0,0,,第二步，是准备内容。
+Dialogue: 0,0:00:41.68,0:00:47.62,Default,,0,0,0,,在人设管理里输入要求，可以生成真人风格的人设\N图。
+Dialogue: 0,0:00:47.80,0:01:00.06,Default,,0,0,0,,在内容表里粘贴参考视频，选择人设和视频模型，\NWorker 会下载素材、上传资产，并把任务提交给对应供应商。
+Dialogue: 0,0:01:00.24,0:01:03.22,Default,,0,0,0,,这套流程支持三类生成路径。
+Dialogue: 0,0:01:03.40,0:01:07.42,Default,,0,0,0,,小云雀和 Seedance 负责参考视频换人\N；
+Dialogue: 0,0:01:07.60,0:01:14.66,Default,,0,0,0,,中转站可以走文生视频、图生视频、首尾帧和参考\N视频生成；
+Dialogue: 0,0:01:14.84,0:01:19.18,Default,,0,0,0,,LTX 会按五秒分段处理参考视频。
+Dialogue: 0,0:01:19.36,0:01:21.54,Default,,0,0,0,,系统提取边界帧。
+Dialogue: 0,0:01:21.72,0:01:24.54,Default,,0,0,0,,再合成为等时长竖屏成片。
+Dialogue: 0,0:01:24.72,0:01:30.50,Default,,0,0,0,,运行时，飞书会回填状态、任务链接和失败原因。
+Dialogue: 0,0:01:30.68,0:01:35.50,Default,,0,0,0,,如果中途断开，Worker 会继续轮询已有任\N务。
+Dialogue: 0,0:01:35.68,0:01:41.22,Default,,0,0,0,,发布前，系统会校验账号、登录状态和幂等键。
+Dialogue: 0,0:01:41.40,0:01:45.82,Default,,0,0,0,,确认后，MultiPost 扩展完成真实发布\N。
+Dialogue: 0,0:01:46.00,0:01:49.94,Default,,0,0,0,,发布结果和时间会自动回填到飞书。
+Dialogue: 0,0:01:50.12,0:01:54.38,Default,,0,0,0,,这段是当前飞书里正在复刻的真实案例。
+Dialogue: 0,0:01:54.56,0:01:57.70,Default,,0,0,0,,左侧是目标博主和原视频。
+Dialogue: 0,0:01:57.88,0:02:02.86,Default,,0,0,0,,后面展示的是工具生成出的两个复刻账号内容。
+Dialogue: 0,0:02:03.04,0:02:10.18,Default,,0,0,0,,团队可以从看板看到内容量、生成进度、发布结果\N和异常记录。
+Dialogue: 0,0:02:10.36,0:02:21.02,Default,,0,0,0,,最终目标，是把模型平台、浏览器扩展和人工表格，\N收束成一条可追踪、可重试的自动化流程。

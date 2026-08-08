@@ -10,6 +10,9 @@ const DEFAULT_CONFIG = Object.freeze({
   ltx_base_url: '',
   poll_interval_seconds: 10,
   max_poll_minutes: 180,
+  douyin_hot_daily_sync_time: '08:00',
+  douyin_hot_candidate_limit: 50,
+  douyin_hot_limit: 10,
   multipost_account_port: 17386,
   yt_dlp_command: 'yt-dlp',
 });
@@ -54,6 +57,9 @@ function validateConfig(config, { features = ['core'], env = process.env } = {})
   if (features.includes('relay')) {
     ['relay_content_table_id', 'relay_final_video_attachment_field_id']
       .forEach((field) => requiredFields.add(field));
+  }
+  if (features.includes('prompt-library')) {
+    requiredFields.add('prompt_library_table_id');
   }
   if (features.includes('ltx')) {
     ['ltx_content_table_id', 'ltx_final_video_attachment_field_id']

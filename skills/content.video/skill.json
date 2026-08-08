@@ -1,0 +1,6 @@
+{
+  "id": "content.video",
+  "version": "1.0.0",
+  "name": "内容视频生成",
+  "permissions": ["model:video", "artifact:write"]
+}

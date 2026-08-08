@@ -1,0 +1,6 @@
+{
+  "id": "content.prompt",
+  "version": "1.0.0",
+  "name": "内容提示词生成",
+  "permissions": ["model:chat"]
+}

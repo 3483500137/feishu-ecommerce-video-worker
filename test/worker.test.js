@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { buildInvalidPublishPatch, buildOrphanedPublishTaskPatch, buildLtxAnalysisRequest, buildLtxCompletedPatch, buildLtxFailedPatch, buildLtxPayload, buildLtxStartPatch, buildPersonaImagePrompt, buildPersonaImageRequest, buildPublishAttempt, buildPublishCopyPrompt, buildRelaySegmentPrompt, buildVideoGenerationMessage, collectUrls, chooseArtifactUrl, completeContentVideo, contentJobAction, downloadHttp, extractDouyinShareVideo, extractMarkdownUrl, firstOption, formatPublishTags, hydrateRelayPersona, inspectLtxTask, inspectXyqRun, linkedRecordId, ltxJobAction, ltxModelChoice, ltxReferenceUrl, parsePublishCopy, personaJobAction, platformPublishJobAction, probeVideoDuration, processConfirmedPublish, readVideoDataUrl, relaySegmentPlan, relaySegmentSecondsForAccess, relaySegmentTimeline, relayTaskDescriptor, requestLtxStoryboard, resolveDouyinShareVideo, resolveReferenceSource, resolveFieldIds, rowsFromEnvelope, serializeRelayTaskDescriptor, videoModelChoice } = require('../src/worker');
+const { buildInvalidPublishPatch, buildOrphanedPublishTaskPatch, buildLtxAnalysisRequest, buildLtxCompletedPatch, buildLtxFailedPatch, buildLtxPayload, buildLtxStartPatch, buildPersonaImagePrompt, buildPersonaImageRequest, buildPromptLibraryVideoRequest, buildPublishAttempt, buildPublishCopyPrompt, buildRelaySegmentPrompt, buildVideoGenerationMessage, collectUrls, chooseArtifactUrl, completeContentVideo, contentJobAction, createPersonaFaceCrop, downloadHttp, downloadPersonaImage, extractDouyinShareVideo, extractMarkdownUrl, firstOption, formatPublishTags, hydratePromptLibrarySelection, hydrateRelayPersona, imageUrlDataUrl, inspectLtxTask, inspectXyqRun, linkedRecordId, ltxJobAction, ltxModelChoice, ltxReferenceUrl, parsePublishCopy, personaJobAction, platformContentSource, platformPublishJobAction, probeVideoDuration, processConfirmedPublish, promptLibrarySyncDue, readVideoDataUrl, relaySegmentPlan, relaySegmentSecondsForAccess, relaySegmentTimeline, relayTaskDescriptor, requestLtxStoryboard, resolveDouyinShareVideo, resolveReferenceSource, resolveFieldIds, rowsFromEnvelope, serializeRelayTaskDescriptor, shouldGeneratePromptFromLibrary, videoModelChoice } = require('../src/worker');
 
 function artifactEntry(subType, mediaKey, url, name) {
   return {
@@ -16,6 +16,53 @@ function artifactEntry(subType, mediaKey, url, name) {
     },
   };
 }
+
+function xyqMessageEntry(subType, data) {
+  return {
+    type: 1,
+    message: {
+      content: [{ sub_type: subType, data: JSON.stringify(data) }],
+    },
+  };
+}
+
+function xyqGenerateEntry(request) {
+  return xyqMessageEntry('tool_call_req', {
+    tool_name: 'sandbox_generate_video',
+    request_data: JSON.stringify(request),
+  });
+}
+
+function xyqPartErrorEntry(code, message) {
+  return {
+    type: 2,
+    artifact: {
+      content: [{ sub_type: 'biz/part_error', data: JSON.stringify({ code, message }) }],
+    },
+  };
+}
+
+test('平台发布内容来源支持小云雀内容或中转站内容，且必须二选一', () => {
+  assert.deepEqual(platformContentSource({ '内容': [{ id: 'rec-xyq' }] }), { kind: 'xyq', recordId: 'rec-xyq' });
+  assert.deepEqual(platformContentSource({ '中转站内容': [{ id: 'rec-relay' }] }), { kind: 'relay', recordId: 'rec-relay' });
+  assert.match(platformContentSource({}).error, /内容/);
+  assert.match(platformContentSource({ '内容': [{ id: 'rec-xyq' }], '中转站内容': [{ id: 'rec-relay' }] }).error, /只能选择/);
+  assert.equal(platformPublishJobAction({
+    '中转站内容': [{ id: 'rec-relay' }],
+    '平台账号': [{ id: 'rec-account' }],
+  }), 'generate');
+});
+
+test('平台发布识别飞书表实际的小云雀内容字段并进入文案生成', () => {
+  const row = {
+    '小云雀内容': [{ id: 'rec-xyq' }],
+    '平台账号': [{ id: 'rec-account' }],
+    '最终视频': 'https://example.com/final.mp4',
+  };
+
+  assert.deepEqual(platformContentSource(row), { kind: 'xyq', recordId: 'rec-xyq' });
+  assert.equal(platformPublishJobAction(row), 'generate');
+});
 
 test('中转站参考视频任务把关联人设解析为完整人设正文', () => {
   const relayRow = {
@@ -507,10 +554,114 @@ test('video task message forbids segment repetition and requires a continuous re
   assert.match(message, /不得循环、回放或重新开始/);
 });
 
+test('内容任务可以选择提示词库并在生成视频前扩写最终视频提示词', () => {
+  const row = {
+    '提示词库': [{ id: 'rec-prompt-1' }],
+    '生成视频提示词': ['是'],
+    '参考视频链接': 'https://example.com/reference.mp4',
+  };
+  const hydrated = hydratePromptLibrarySelection(row, new Map([[
+    'rec-prompt-1',
+    {
+      '热点标题': '昆明小炒',
+      '建议提示词': '围绕城市烟火气创作，开头展示爆炒特写',
+      '系统推荐方向': ['账号涨粉'],
+      '成交适配分': 98,
+      '涨粉适配分': 94,
+      '复刻适配分': 100,
+      '是否启用': ['是'],
+    },
+  ]]));
+  const request = buildPromptLibraryVideoRequest({
+    ...hydrated,
+    '人设正文': '年轻美食探店博主',
+  });
+
+  assert.equal(shouldGeneratePromptFromLibrary(hydrated), true);
+  assert.equal(hydrated['提示词库热点标题'], '昆明小炒');
+  assert.equal(hydrated['提示词库推荐方向'], '账号涨粉');
+  assert.match(request.messages[1].content, /城市烟火气/);
+  assert.match(request.messages[1].content, /唯一目标方向：账号涨粉/);
+  assert.match(request.messages[1].content, /弱化硬广感/);
+  assert.match(request.messages[1].content, /年轻美食探店博主/);
+  assert.match(request.messages[1].content, /不得覆盖参考视频/);
+  assert.equal(shouldGeneratePromptFromLibrary({
+    ...hydrated,
+    '视频提示词': '已经生成的提示词',
+  }), false);
+  assert.equal(shouldGeneratePromptFromLibrary({
+    ...hydrated,
+    '视频提示词': '旧提示词',
+    '生成视频提示词': ['重新生成'],
+  }), true);
+
+  const overrideRequest = buildPromptLibraryVideoRequest({
+    ...hydrated,
+    '目标方向': ['电商成交'],
+  });
+  assert.match(overrideRequest.messages[1].content, /唯一目标方向：电商成交/);
+  assert.match(overrideRequest.messages[1].content, /自然植入商品使用场景/);
+  assert.doesNotMatch(overrideRequest.messages[1].content, /唯一目标方向：账号涨粉/);
+});
+
+test('停用或缺失的提示词库记录会给出明确配置错误', () => {
+  const disabled = hydratePromptLibrarySelection({
+    '提示词库': [{ id: 'rec-disabled' }],
+  }, new Map([['rec-disabled', {
+    '热点标题': '停用话题',
+    '建议提示词': '旧建议',
+    '是否启用': ['否'],
+  }]]));
+
+  assert.throws(() => buildPromptLibraryVideoRequest(disabled), /已停用/);
+  assert.throws(() => buildPromptLibraryVideoRequest({}), /选择一条可用/);
+});
+
+test('抖音热点按北京时间每天固定时间只同步一次', () => {
+  const beforeSchedule = new Date('2026-08-03T23:30:00.000Z');
+  const afterSchedule = new Date('2026-08-04T00:30:00.000Z');
+  assert.equal(promptLibrarySyncDue('', { now: beforeSchedule, dailySyncTime: '08:00' }), true);
+  assert.equal(promptLibrarySyncDue('2026-08-03T00:10:00.000Z', {
+    now: beforeSchedule,
+    dailySyncTime: '08:00',
+  }), false);
+  assert.equal(promptLibrarySyncDue('2026-08-03T00:10:00.000Z', {
+    now: afterSchedule,
+    dailySyncTime: '08:00',
+  }), true);
+  assert.equal(promptLibrarySyncDue('2026-08-04T00:05:00.000Z', {
+    now: afterSchedule,
+    dailySyncTime: '08:00',
+  }), false);
+});
+
+test('video task message keeps the original BGM continuous without cutting', () => {
+  const message = buildVideoGenerationMessage({ referenceDurationSeconds: 16.7 });
+
+  assert.match(message, /先检查参考视频的 BGM 是否从头到尾连贯/);
+  assert.match(message, /直接完整复用原视频 BGM 音轨/);
+  assert.match(message, /不得切割、截断、重排或拼接 BGM/);
+});
+
 test('URL-only video task tells 小云雀 to detect duration before generation', () => {
   const message = buildVideoGenerationMessage({ fallbackUrl: 'https://v.douyin.com/example/' });
   assert.match(message, /先读取参考视频并检测其精确时长/);
   assert.match(message, /误差不得超过 1 秒/);
+  assert.match(message, /抖音参考视频分享链接：https:\/\/v\.douyin\.com\/example\//);
+  assert.match(message, /必须始终使用这个分享链接对应的同一条原视频/);
+});
+
+test('video task forbids dropping the reference video after review rejection', () => {
+  const message = buildVideoGenerationMessage({
+    fallbackUrl: 'https://v.douyin.com/example/',
+    hasPersonaFaceCrop: true,
+  });
+
+  assert.match(message, /每一个视频生成分段都必须.*VideoList/);
+  assert.match(message, /审核被拦截.*必须立即停止/);
+  assert.match(message, /禁止删除或省略 VideoList/);
+  assert.match(message, /不得使用人设图片的背景替换参考视频场景/);
+  assert.match(message, /第二张图片.*脸部身份特写/);
 });
 
 test('video task requires a full-frame 9:16 canvas without landscape side backgrounds', () => {
@@ -762,6 +913,109 @@ test('completed existing run returns its final composite artifact', () => {
   });
 });
 
+test('strict video acceptance allows a matching model and reference-backed generation', () => {
+  const run = {
+    state: 3,
+    entry_list: [
+      xyqMessageEntry('biz/general_agent_settings', { video_model: 'Seedance_2.0_mini' }),
+      xyqGenerateEntry({
+        OutputPath: './assets/shot_01.mp4',
+        ImageList: ['./upload/persona.jpg'],
+        VideoList: ['./tmp/reference-part1.mp4'],
+        Prompt: '继承参考视频场景与动作',
+      }),
+      artifactEntry('biz/x_data_video', 'video', 'https://cdn.example.com/final.mp4', 'final.mp4'),
+    ],
+  };
+
+  assert.deepEqual(inspectXyqRun(run, 'video', {
+    expectedModelId: 'Seedance_2.0_mini',
+    requireReferenceVideo: true,
+  }), {
+    status: 'completed',
+    resultUrl: 'https://cdn.example.com/final.mp4',
+  });
+});
+
+test('strict video acceptance rejects a successful-looking fallback without VideoList', () => {
+  const run = {
+    state: 3,
+    entry_list: [
+      xyqMessageEntry('biz/general_agent_settings', { video_model: 'Seedance_2.0_mini' }),
+      xyqGenerateEntry({
+        OutputPath: './assets/shot_01.mp4',
+        ImageList: ['./upload/persona.jpg'],
+        Prompt: '仅使用人设图重新生成',
+      }),
+      artifactEntry('biz/x_data_video', 'video', 'https://cdn.example.com/fallback.mp4', 'fallback.mp4'),
+    ],
+  };
+
+  const outcome = inspectXyqRun(run, 'video', {
+    expectedModelId: 'Seedance_2.0_mini',
+    requireReferenceVideo: true,
+  });
+  assert.equal(outcome.status, 'failed');
+  assert.match(outcome.error, /未传 VideoList/);
+  assert.match(outcome.error, /拒绝无参考视频降级结果/);
+});
+
+test('strict video acceptance rejects compliance-blocked and model-mismatched results', () => {
+  const run = {
+    state: 3,
+    entry_list: [
+      xyqMessageEntry('biz/general_agent_settings', { video_model: 'seedance2.0_fast_vision' }),
+      xyqGenerateEntry({
+        OutputPath: './assets/shot_01.mp4',
+        ImageList: ['./upload/persona.jpg'],
+        VideoList: ['./tmp/reference-part1.mp4'],
+        Prompt: '继承参考视频场景与动作',
+      }),
+      xyqPartErrorEntry(12009, '内容不符合安全合规要求'),
+      artifactEntry('biz/x_data_video', 'video', 'https://cdn.example.com/replacement.mp4', 'replacement.mp4'),
+    ],
+  };
+
+  const outcome = inspectXyqRun(run, 'video', {
+    expectedModelId: 'Seedance_2.0_mini',
+    requireReferenceVideo: true,
+  });
+  assert.equal(outcome.status, 'failed');
+  assert.match(outcome.error, /12009/);
+  assert.match(outcome.error, /seedance2\.0_fast_vision/);
+  assert.match(outcome.error, /Seedance_2\.0_mini/);
+});
+
+test('strict video acceptance rejects scene overrides and missing segment tail frames', () => {
+  const run = {
+    state: 3,
+    entry_list: [
+      xyqMessageEntry('biz/general_agent_settings', { video_model: 'Seedance_2.0_mini' }),
+      xyqGenerateEntry({
+        OutputPath: './assets/shot_01.mp4',
+        ImageList: ['./upload/persona.jpg'],
+        VideoList: ['./tmp/reference-part1.mp4'],
+        Prompt: '仅参考动作，不继承场景与色调',
+      }),
+      xyqGenerateEntry({
+        OutputPath: './assets/shot_02.mp4',
+        ImageList: ['./upload/persona.jpg'],
+        VideoList: ['./tmp/reference-part2.mp4'],
+        Prompt: '承接后半段',
+      }),
+      artifactEntry('biz/x_data_video', 'video', 'https://cdn.example.com/final.mp4', 'final.mp4'),
+    ],
+  };
+
+  const outcome = inspectXyqRun(run, 'video', {
+    expectedModelId: 'Seedance_2.0_mini',
+    requireReferenceVideo: true,
+  });
+  assert.equal(outcome.status, 'failed');
+  assert.match(outcome.error, /不继承参考视频场景/);
+  assert.match(outcome.error, /未传上一段尾帧/);
+});
+
 test('content completion uploads final video into an online-preview attachment when configured', async () => {
   const calls = [];
   await completeContentVideo({
@@ -859,6 +1113,47 @@ test('downloadHttp stores video/mp4 responses with an mp4 extension', async (t) 
   assert.equal(fs.readFileSync(file, 'utf8'), 'video bytes');
 });
 
+test('persona image download prefers the durable Feishu attachment over an expired direct URL', async () => {
+  const attachmentFile = path.join(os.tmpdir(), 'persona-from-feishu.jpg');
+  const calls = [];
+
+  const result = await downloadPersonaImage({
+    record_id: 'rec-persona',
+    '人物形象': [{ file_token: 'person-file-token' }],
+    '人物形象链接（内部）': 'https://expired.example.com/persona.jpg',
+  }, path.join(os.tmpdir(), 'persona-download'), {
+    downloadAttachment: (...args) => {
+      calls.push(args);
+      return attachmentFile;
+    },
+    download: async () => {
+      throw new Error('expired URL must not be requested when attachment exists');
+    },
+  });
+
+  assert.equal(result, attachmentFile);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0][1], 'rec-persona');
+});
+
+test('persona face crop creates a square identity reference from the full-body image', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'persona-face-crop-'));
+  const input = path.join(root, 'persona.jpg');
+  const output = path.join(root, 'identity', 'face.jpg');
+  fs.writeFileSync(input, 'persona');
+  let capturedArgs;
+
+  const result = createPersonaFaceCrop(input, output, (_command, args) => {
+    capturedArgs = args;
+    fs.writeFileSync(output, 'face');
+    return { status: 0 };
+  });
+
+  assert.equal(result, output);
+  assert.match(capturedArgs[capturedArgs.indexOf('-vf') + 1], /crop=.*scale=1024:1024/);
+  assert.equal(capturedArgs.at(-1), output);
+});
+
 test('downloadHttp uses Douyin-friendly headers for resolved douyinvod media', async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'douyin-download-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -879,6 +1174,23 @@ test('downloadHttp uses Douyin-friendly headers for resolved douyinvod media', a
 
   assert.equal(capturedOptions.headers.Referer, 'https://www.iesdouyin.com/');
   assert.match(capturedOptions.headers['User-Agent'], /iPhone/);
+});
+
+test('hotspot covers are converted to bounded image data URLs for multimodal analysis', async () => {
+  let capturedOptions;
+  const dataUrl = await imageUrlDataUrl('https://p3-sign.douyinpic.com/cover.jpeg', {
+    fetchImpl: async (_url, options) => {
+      capturedOptions = options;
+      return {
+        ok: true,
+        headers: { get: () => 'image/jpeg; charset=binary' },
+        arrayBuffer: async () => Buffer.from('jpeg-bytes'),
+      };
+    },
+  });
+
+  assert.equal(dataUrl, `data:image/jpeg;base64,${Buffer.from('jpeg-bytes').toString('base64')}`);
+  assert.match(capturedOptions.headers.Referer, /douyin\.com/);
 });
 
 test('running existing run remains pending for the next scheduled scan', () => {

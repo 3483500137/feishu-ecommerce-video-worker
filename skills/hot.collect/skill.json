@@ -1,0 +1,6 @@
+{
+  "id": "hot.collect",
+  "version": "1.0.0",
+  "name": "热点采集",
+  "permissions": ["network:public-read"]
+}

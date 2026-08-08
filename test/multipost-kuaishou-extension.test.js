@@ -84,6 +84,7 @@ test('merges Kuaishou into MultiPost serialized account storage', () => {
 test('extension manifest loads the account bridge and wrapper service worker', () => {
   const manifest = JSON.parse(fs.readFileSync(path.join(EXTENSION_ROOT, 'manifest.json'), 'utf8'));
   assert.equal(manifest.background.service_worker, 'static/background/multipost-service-worker.js');
+  assert.ok(manifest.host_permissions.includes('https://*.trycloudflare.com/*'));
   assert.ok(manifest.content_scripts.some((entry) => (
     entry.matches.includes('https://cp.kuaishou.com/*')
       && entry.js.includes('kuaishou-account-content.js')

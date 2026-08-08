@@ -33,3 +33,9 @@ test('validateConfig checks optional LTX settings only when that feature is enab
   assert.ok(errors.some((message) => message.includes('ltx_final_video_attachment_field_id')));
   assert.equal(errors.some((message) => message.includes('KIMI_API_KEY')), false);
 });
+
+test('validateConfig requires the prompt library table only when hot-list sync is enabled', () => {
+  const errors = validateConfig({}, { features: ['prompt-library'], env: {} });
+  assert.ok(errors.some((message) => message.includes('prompt_library_table_id')));
+  assert.equal(validateConfig({}, { features: [], env: {} }).length, 0);
+});

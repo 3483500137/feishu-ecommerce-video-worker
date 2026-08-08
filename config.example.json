@@ -2,6 +2,8 @@
   "base_token": "your_feishu_base_token",
   "persona_table_id": "your_persona_table_id",
   "content_table_id": "your_content_table_id",
+  "prompt_library_table_id": "your_prompt_library_table_id",
+  "hot_direction_table_id": "your_hot_direction_table_id",
   "access_api_table_id": "your_access_api_table_id",
   "relay_content_table_id": "your_relay_content_table_id",
   "ltx_content_table_id": "your_ltx_content_table_id",
@@ -18,6 +20,23 @@
   "ltx_base_url": "https://your-newapi-domain.example",
   "poll_interval_seconds": 10,
   "max_poll_minutes": 180,
+  "douyin_hot_daily_sync_time": "08:00",
+  "douyin_hot_candidate_limit": 50,
+  "douyin_hot_limit": 10,
   "yt_dlp_path": "C:\\path\\to\\yt-dlp",
-  "xyq_skill_scripts": "C:\\path\\to\\xyq-nest-skill\\scripts"
+  "xyq_skill_scripts": "C:\\path\\to\\xyq-nest-skill\\scripts",
+  "workflow_base": {
+    "workflow_config_table_id": "your_workflow_config_table_id",
+    "skill_registry_table_id": "your_skill_registry_table_id",
+    "business_task_table_id": "your_business_task_table_id",
+    "task_run_table_id": "your_task_run_table_id",
+    "task_event_table_id": "your_task_event_table_id",
+    "artifact_table_id": "your_artifact_table_id",
+    "human_decision_table_id": "your_human_decision_table_id",
+    "member_authorization_table_id": "your_member_authorization_table_id",
+    "metrics_table_id": "your_metrics_table_id"
+  },
+  "feishu_bot_app_id": "your_feishu_bot_app_id",
+  "feishu_bot_secret_alias": "feishu-bot-app-secret",
+  "feishu_bot_allowed_open_ids": []
 }

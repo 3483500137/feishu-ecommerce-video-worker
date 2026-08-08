@@ -1,0 +1,13 @@
+{
+  "id": "workflow-discovery",
+  "version": "1.0.0",
+  "name": "业务流程诊断",
+  "initial_state": "intake",
+  "states": ["intake", "mapping", "awaiting_approval", "approved", "rejected"],
+  "transitions": [
+    { "event": "map", "from": "intake", "to": "mapping" },
+    { "event": "submit", "from": "mapping", "to": "awaiting_approval" },
+    { "event": "approve", "from": "awaiting_approval", "to": "approved", "requires_human": true },
+    { "event": "reject", "from": "awaiting_approval", "to": "rejected", "requires_human": true }
+  ]
+}
